@@ -1,35 +1,115 @@
-// main-demo.test.mjs — pins the exact values of the demo scenario built
-// by public/js/app/main.js's buildDemoHistory(), so a change to the
-// economics reducers that silently changes what the deployed page shows
-// gets caught here rather than only visually, in a browser.
+// main-demo.test.mjs — pins the exact behavior of the two-domain
+// (Earth/Mars) interplanetary demo built by public/js/app/main.js, so a
+// change to the economics reducers that silently changes what the
+// deployed page shows gets caught here rather than only visually, in a
+// browser.
 //
-// This intentionally duplicates the event sequence rather than importing
-// it from main.js, since main.js also touches the DOM (document.*) and
-// is not meant to be imported in a non-browser test environment.
+// This intentionally duplicates DomainReplica's logic rather than
+// importing it from main.js, since main.js also touches the DOM
+// (document.*) and is not meant to be imported in a non-browser test
+// environment.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventDag } from '../public/js/core/event-dag.js';
 import { materializeG } from '../public/js/core/economics/g.js';
 
-const DOMAIN = 'demo-colony';
-const theta = { reward: { K: 1, alpha: 1, beta: 1 }, budgets: { [DOMAIN]: 1000 } };
+const theta = { reward: { K: 1, alpha: 1, beta: 1 }, budgets: { earth: 1000, mars: 1000 } };
 
-test('main.js demo scenario materializes to the exact values shown on the deployed page', async () => {
-  const ledger = new EventDag();
-  const genesis = await ledger.addEvent([], { type: 'genesis' });
-  const c1 = await ledger.addEvent([genesis], { type: 'cadence', domain: DOMAIN, epoch: 1 });
-  const c2 = await ledger.addEvent([c1], { type: 'cadence', domain: DOMAIN, epoch: 2 });
-  await ledger.addEvent([c2], { type: 'accrual', domain: DOMAIN, b: 10, q0: 0 });
-  const c3 = await ledger.addEvent([c2], { type: 'cadence', domain: DOMAIN, epoch: 3 });
-  await ledger.addEvent([c3], { type: 'accrual', domain: DOMAIN, b: 4, q0: 2 });
+class DomainReplica {
+  constructor(name, dag) {
+    this.name = name;
+    this.dag = dag;
+    this.genesisId = null;
+    this.lastEventId = null;
+    this.lastCadenceId = null;
+    this.epoch = 0;
+    this.pending = [];
+  }
+  async advanceCadence() {
+    const nextEpoch = this.epoch + 1;
+    const parents = [...new Set([this.lastCadenceId ?? this.genesisId, this.lastEventId])];
+    const id = await this.dag.addEvent(parents, { type: 'cadence', domain: this.name, epoch: nextEpoch });
+    this.lastCadenceId = id;
+    this.lastEventId = id;
+    this.epoch = nextEpoch;
+    return id;
+  }
+  commit(amount) {
+    this.pending.push({ b: amount, q0: this.epoch });
+  }
+  async claim() {
+    const claimed = this.pending;
+    this.pending = [];
+    for (const c of claimed) {
+      const id = await this.dag.addEvent([this.lastEventId], { type: 'accrual', domain: this.name, b: c.b, q0: c.q0 });
+      this.lastEventId = id;
+    }
+    return claimed.length;
+  }
+  materialize() {
+    return materializeG(theta, this.dag.topoOrder());
+  }
+}
 
-  const state = materializeG(theta, ledger.topoOrder());
+async function makeReplica(name) {
+  const replica = new DomainReplica(name, new EventDag());
+  const genesisId = await replica.dag.addEvent([], { type: 'genesis' });
+  replica.genesisId = genesisId;
+  replica.lastEventId = genesisId;
+  return replica;
+}
 
-  assert.equal(ledger.size, 6);
-  assert.equal(state.cadence.domains[DOMAIN].epoch, 3);
-  assert.equal(state.balances[DOMAIN], 34);
-  assert.equal(state.scarcity.domains[DOMAIN].used, 34);
-  assert.equal(state.cadence.rejections.length, 0);
-  assert.equal(state.accrualRejections.length, 0);
+test('commit() records a pending claim without touching the ledger', async () => {
+  const earth = await makeReplica('earth');
+  earth.commit(10);
+  assert.equal(earth.pending.length, 1);
+  assert.equal(earth.dag.size, 1); // still just genesis — commit is not a ledger event
+});
+
+test('claim() posts pending commits and reward reflects elapsed cadence epochs since q0, not instant', async () => {
+  const earth = await makeReplica('earth');
+  earth.commit(10); // q0 = 0
+  await earth.advanceCadence();
+  await earth.advanceCadence(); // epoch = 2
+  const claimedCount = await earth.claim();
+
+  assert.equal(claimedCount, 1);
+  assert.equal(earth.materialize().balances.earth, 20); // K=1, b=10, q=2-0=2
+});
+
+test('Earth and Mars share the same genesis id without any coordination (content-addressed, §8.1)', async () => {
+  const earth = await makeReplica('earth');
+  const mars = await makeReplica('mars');
+  assert.equal(earth.genesisId, mars.genesisId);
+});
+
+test('two domains accrue independently while partitioned, then converge exactly after reconcile', async () => {
+  const earth = await makeReplica('earth');
+  const mars = await makeReplica('mars');
+
+  earth.commit(10);
+  await earth.advanceCadence();
+  await earth.advanceCadence();
+  await earth.claim(); // earth balance: 10 * 2 = 20
+
+  await mars.advanceCadence();
+  mars.commit(10);
+  await mars.advanceCadence();
+  await mars.claim(); // mars balance: 10 * 1 = 10
+
+  assert.equal(earth.materialize().balances.earth, 20);
+  assert.equal(mars.materialize().balances.mars, 10);
+
+  // Reconcile: set union, both directions.
+  earth.dag.merge(mars.dag);
+  mars.dag.merge(earth.dag);
+
+  const earthView = earth.materialize();
+  const marsView = mars.materialize();
+
+  assert.deepEqual(earthView.balances, marsView.balances);
+  assert.deepEqual(earthView.balances, { earth: 20, mars: 10 });
+  assert.equal(earth.dag.size, mars.dag.size);
+  assert.equal(earth.dag.size, 7); // shared genesis + 2 cadence + 1 accrual (earth) + 2 cadence + 1 accrual (mars)
 });
