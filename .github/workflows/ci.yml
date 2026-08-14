@@ -25,6 +25,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: npm install (test-only deps, e.g. @solana/web3.js)
+        run: npm install
       - name: node --test
         run: node --test tests/*.test.mjs
 
