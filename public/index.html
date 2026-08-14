@@ -1,72 +1,36 @@
-name: CI
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AIWA — Autonomous Interplanetary Web Application</title>
+  <meta name="description" content="AIWA: reference architecture for identity, modular applications, and value accrual under arbitrarily long communication partition." />
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; }
+    th, td { text-align: left; padding: 0.35rem 0.6rem; border-bottom: 1px solid #ddd; font-variant-numeric: tabular-nums; }
+    th { font-weight: 600; }
+    #status, #rejections { color: #555; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <main id="app">
+    <h1>AIWA</h1>
+    <p>Autonomous Interplanetary Web Application</p>
+    <p id="status">Initializing…</p>
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    <section id="economics">
+      <h2>Materialized economic view — A = G(H<sub>d</sub>, θ)</h2>
+      <table id="domains-table">
+        <thead>
+          <tr><th>Domain</th><th>Epoch</th><th>Balance</th><th>Budget used</th></tr>
+        </thead>
+        <tbody id="domains-body"></tbody>
+      </table>
+      <p id="rejections"></p>
+    </section>
+  </main>
 
-jobs:
-  rust-tests:
-    name: Rust unit tests (native)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: cargo test
-        working-directory: rust-core
-        run: cargo test
-
-  js-tests:
-    name: JS unit + integration tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: node --test
-        run: node --test tests/*.test.mjs
-
-  id-parity:
-    name: JS / Rust id parity
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Verify parity
-        run: ./scripts/verify-parity.sh
-
-  g-parity:
-    name: JS / Rust composed-G parity
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Verify G parity
-        run: ./scripts/verify-g-parity.sh
-
-  wasm-build:
-    name: Build WASM package
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-      - name: Build
-        working-directory: rust-core
-        run: wasm-pack build --target web --out-dir ../public/js/wasm --out-name aiwa_core
-      - name: Upload wasm artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aiwa-wasm
-          path: public/js/wasm/
+  <script type="module" src="./js/app/main.js"></script>
+</body>
+</html>
