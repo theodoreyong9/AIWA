@@ -3,6 +3,7 @@ mod core;
 mod dag;
 mod economics;
 mod event;
+mod identity;
 
 pub use conservation::{identity_derivation, Claim, ClaimStatus, ConservationError, ConservationState, DerivationFn, Proof};
 pub use core::EventDagCore;
@@ -13,3 +14,7 @@ pub use economics::{
     Snapshot, Theta,
 };
 pub use event::Event;
+pub use identity::{
+    verify_burn_proof, Commitment, IdentityCostState, NormalizedBurnTx, RegisterResult,
+    RegisteredIdentity, VerifyResult, SOLANA_INCINERATOR_ADDRESS,
+};
