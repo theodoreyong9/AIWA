@@ -1,0 +1,8 @@
+[
+  { "name": "flat, key order A", "parents": [], "payload": { "type": "genesis", "amount": 10 } },
+  { "name": "flat, key order B", "parents": [], "payload": { "amount": 10, "type": "genesis" } },
+  { "name": "nested, key order A", "parents": [], "payload": { "type": "transfer", "meta": { "from": "d1", "to": "d2" } } },
+  { "name": "nested, key order B", "parents": [], "payload": { "meta": { "to": "d2", "from": "d1" }, "type": "transfer" } },
+  { "name": "array preserves order", "parents": [], "payload": { "type": "batch", "items": [3, 1, 2] } },
+  { "name": "with parents, unsorted input", "parents": ["b", "a"], "payload": { "type": "child" } }
+]
