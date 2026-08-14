@@ -63,6 +63,7 @@ AIWA/
 │   ├── g-integration.test.mjs       ← composed G wired to the real EventDag + topoOrder
 │   ├── g-scenario.test.mjs          ← regression test pinning exact values for the shared cross-language fixture
 │   ├── counterexample-wallclock.test.mjs ← deliberate broken-G counterexample (§9, §10) — never exported as production code
+│   ├── main-demo.test.mjs           ← pins the exact values public/js/app/main.js displays
 │   └── lemma1.test.mjs              ← executable Lemma 1 (§11) counterexample and confirmation
 ├── test-vectors/
 │   ├── id-parity.json        ← shared fixture for the JS/Rust id parity check
@@ -91,7 +92,7 @@ ledger — and is kept current as work lands.
 | Layer / function | Paper ref. | Status |
 |---|---|---|
 | **Ledger** — event DAG H_d | §8, §8.1 | ✅ Done, JS/Rust id parity verified |
-| **Economics** — G(H_d, θ): cadence, reward, scarcity | §9–13 | 🔨 Phases 1–4 done (cadence, reward, scarcity, full composed G); Phases 5–7 remain (cross-impl parity, deliberate counterexample, wired into app) — see plan below |
+| **Economics** — G(H_d, θ): cadence, reward, scarcity | §9–13 | ✅ Done — all 7 phases (cadence, reward, scarcity, composed G, cross-impl parity, deliberate counterexample, wired into the app); JS only so far, WASM-side not yet wired (see Status) |
 | **Identity** — Lemma 1, strong/weak scheme selection | §11, §26 | 🔨 Lemma 1 verified structurally for the accrual case (see Phase 4, `g-integration.test.mjs`); the general strong/weak scheme-selection mechanism (§26) not yet built |
 | **Conservation** — proof-carrying transfer, replay-resistant consumption guard | §6.1, §7 | ⏳ Not started — a distinct mechanism from accrual, not a byproduct of G |
 | **Economic security** — Sybil / patient-capital cost model | §24 | ⏳ Not started, now has a real G to analyze against |
@@ -99,12 +100,14 @@ ledger — and is kept current as work lands.
 | **Modules** — sandboxed third-party extensibility, `ctx` contract, economic self-declaration | §27 | ⏳ Not started — §27.2 now has a real reward function to validate module registration against |
 | **AI layer** — advisory/triage, structurally non-authoritative | §28 | ⏳ Not started, depends on modules existing to triage |
 | **Presentation** — theme/layout independence from module logic | §27.3 | ⏳ Not started, depends on modules |
-| **Deliberately-broken counterexamples** — regression harness proving the tests can actually fail | §20–22 | 🔨 Partial: `tests/lemma1.test.mjs` covers the weak-identity case; economics Phase 6 (wall-clock-instead-of-q) still open |
+| **Deliberately-broken counterexamples** — regression harness proving the tests can actually fail | §20–22 | 🔨 `tests/lemma1.test.mjs` (weak-identity case) and `tests/counterexample-wallclock.test.mjs` (§9/§10 wall-clock case) done; not yet generalized beyond economics |
 
-Current focus: **economics (G) Phases 5–7**, since Phases 1–4 (a real,
-tested, composed G) unblock modules (§27.2) and the strong/weak identity
-choice (§11, §26) — both listed above as now able to proceed against a
-real reward function rather than a hypothetical one.
+Current focus: economics (G) is complete (all 7 phases). Next up:
+either wiring the WASM build into `ledger-bridge.js` and the economics
+reducers (independent of everything else), or moving to a layer that G
+now unblocks — identity's strong/weak scheme selection (§11, §26) or
+modules (§27.2), both of which need a real reward function to validate
+against, which now exists.
 
 ## Economics (G) — development plan
 
@@ -196,8 +199,21 @@ real reward function rather than a hypothetical one.
   value, 10 vs. 1000). Promotes the whitepaper's §10 wall-clock argument
   from asserted to executed — new Appendix H.8. 4 new tests (2 JS + 2
   Rust).
-- **Phase 7 — Wire into the app.** Minimal display in `main.js`: balance
-  per domain, epoch, cumulative issuance.
+- **Phase 7 — Wire into the app.** ✅ Done. `main.js` builds a small demo
+  event history (genesis, three cadence advances, two accrual claims for
+  one domain) and materializes the full composed G, rendered as a table
+  (domain, epoch, balance, budget used) in `index.html`, plus a rejection
+  count. Documented limitation, not silently worked around: this always
+  runs the pure JS ledger — the economics reducers are plain functions
+  over `{id, parents, payload}` arrays and have no WASM-side equivalent
+  wired through `ledger-bridge.js` yet (the WASM `EventDag` exposes
+  `topoOrderJson()`, a JSON string, not the array shape these reducers
+  expect). `tests/main-demo.test.mjs` pins the exact values the deployed
+  page shows (epoch 3, balance 34, budget 34/1000), so a reducer change
+  that silently changes what's on the page gets caught by `node --test`,
+  not only visually. 1 new test (40 JS total; this test has no Rust
+  equivalent since it's specifically pinning the JS-side demo main.js
+  runs).
 
 ## Deploy to GitHub Pages
 
@@ -327,8 +343,10 @@ previous update to this README.)
 - [x] Economics (G) Phase 4: full composed G(H_d, θ) — JS + Rust, 36 JS + 36 Rust tests, Lemma 1 verified structurally via the real DAG
 - [x] Economics (G) Phase 5: composed-G cross-language parity — found and documented a real materialization-order gap (whitepaper §9.1/§29.10/Appendix H.7), 37 JS / 37 Rust tests
 - [x] Economics (G) Phase 6: deliberate wall-clock counterexample — promotes §10's prose argument to an executed proof (Appendix H.8), 39 JS / 39 Rust tests
-- [ ] Economics (G) Phase 7: wired into the app (balance/epoch/issuance display)
-- [ ] WASM artifact actually wired into `ledger-bridge.js` and tested in a browser
+- [x] Economics (G) Phase 7: wired into the app — `main.js` builds a demo history and renders the materialized view (domain, epoch, balance, budget used); 40 JS tests total
+- [x] **Economics (G) plan complete** — all 7 phases done: cadence, reward, scarcity, full composed G, cross-implementation parity (found and fixed a real materialization-order gap), deliberate counterexample, wired into the app
+- [x] Hosting switched from Firebase to GitHub Pages (see Changelog)
+- [ ] WASM artifact actually wired into `ledger-bridge.js` and the economics reducers, and tested in a browser
 - [ ] Transport (pluggable layer, §25)
 - [ ] Identity, modules, AI, presentation, conservation (§11, §26, §27, §28, §6–7 — see "Project roadmap" above)
 
@@ -425,3 +443,12 @@ previous update to this README.)
   `main`), and updated this README's deploy instructions accordingly. No
   code in `public/` changed — the switch is purely about where the same
   static files get served from.
+- Implemented economics (G) Phase 7 — wired into the app. `main.js` now
+  builds a small demo event history and renders the full materialized
+  view in `index.html` (domain, epoch, balance, budget used, rejection
+  count) instead of just a raw event count. Documented, not silently
+  papered over: this only runs the pure JS ledger, since the economics
+  reducers don't yet have a WASM-side equivalent through
+  `ledger-bridge.js`. Added `tests/main-demo.test.mjs` pinning the exact
+  values the deployed page shows. **This completes all 7 phases of the
+  economics (G) development plan.**
