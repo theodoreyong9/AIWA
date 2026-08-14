@@ -1,0 +1,10 @@
+{
+  "claims": [
+    { "id": "c1", "kind": "X", "amount": 10, "owner": "alice" },
+    { "id": "c2", "kind": "X", "amount": 5, "owner": "bob" }
+  ],
+  "transfers": [
+    { "claimId": "c1", "from": "alice", "to": "bob", "n": "n1", "derivation": "identity" },
+    { "claimId": "c2", "from": "bob", "to": "alice", "n": "n2", "derivation": "burnXMintY" }
+  ]
+}
