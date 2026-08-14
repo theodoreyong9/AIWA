@@ -215,21 +215,33 @@ against, which now exists.
   value, 10 vs. 1000). Promotes the whitepaper's §10 wall-clock argument
   from asserted to executed — new Appendix H.8. 4 new tests (2 JS + 2
   Rust).
-- **Phase 7 — Wire into the app.** ✅ Done. `main.js` builds a small demo
-  event history (genesis, three cadence advances, two accrual claims for
-  one domain) and materializes the full composed G, rendered as a table
-  (domain, epoch, balance, budget used) in `index.html`, plus a rejection
-  count. Documented limitation, not silently worked around: this always
-  runs the pure JS ledger — the economics reducers are plain functions
-  over `{id, parents, payload}` arrays and have no WASM-side equivalent
-  wired through `ledger-bridge.js` yet (the WASM `EventDag` exposes
-  `topoOrderJson()`, a JSON string, not the array shape these reducers
-  expect). `tests/main-demo.test.mjs` pins the exact values the deployed
-  page shows (epoch 3, balance 34, budget 34/1000), so a reducer change
-  that silently changes what's on the page gets caught by `node --test`,
-  not only visually. 1 new test (40 JS total; this test has no Rust
-  equivalent since it's specifically pinning the JS-side demo main.js
-  runs).
+- **Phase 7 — Wire into the app.** ✅ Done, then rebuilt around the
+  paper's actual central claim rather than a generic balance table.
+  `main.js`/`index.html` now simulate two independent domains, Earth and
+  Mars, each with its own `EventDag` instance. **Partitioned is the
+  default state**, not an error state — both domains keep accruing
+  locally with zero coordination, matching §9's premise directly rather
+  than just displaying numbers. `Commit` records a resource claim at the
+  current cadence epoch (client-side, no ledger event yet); `Claim
+  reward` posts it — reward requires elapsed cadence epochs between the
+  two, never instant (§10), which is itself demonstrable in the UI, not
+  just asserted. `Reconcile` merges both DAGs (set union, both
+  directions) and — this is the important part — the app then
+  recomputes both domains' balances from *both* replicas' now-identical
+  local event sets and logs whether they agree, checking §9's
+  determinism claim live rather than assuming it. `tests/main-demo.test.mjs`
+  pins this scenario exactly (Earth=20, Mars=10, converges to
+  `{earth:20, mars:10}` on both sides, 7 events either way). 4 new/rewritten tests.
+
+  **A real deployed-page bug found and fixed in the process**:
+  `public/js/core/wasm-ledger-adapter.js` (added when WASM was wired,
+  see above) never actually made it into the GitHub repo — a 404 on a
+  static `import` in `ledger-bridge.js`, which breaks the whole module
+  graph silently (no console-visible exception reaches `main()`'s own
+  `.catch()`, since the module never starts executing). The page was
+  stuck on "Initializing…" indefinitely with an empty table. Confirmed
+  directly against the live repo (`raw.githubusercontent.com`, not
+  guessed) before concluding what was missing.
 
 ## Conservation (§6.1, §7)
 
@@ -429,7 +441,8 @@ previous update to this README.)
 - [x] Economics (G) Phase 4: full composed G(H_d, θ) — JS + Rust, 36 JS + 36 Rust tests, Lemma 1 verified structurally via the real DAG
 - [x] Economics (G) Phase 5: composed-G cross-language parity — found and documented a real materialization-order gap (whitepaper §9.1/§29.10/Appendix H.7), 37 JS / 37 Rust tests
 - [x] Economics (G) Phase 6: deliberate wall-clock counterexample — promotes §10's prose argument to an executed proof (Appendix H.8), 39 JS / 39 Rust tests
-- [x] Economics (G) Phase 7: wired into the app — `main.js` builds a demo history and renders the materialized view (domain, epoch, balance, budget used); 40 JS tests total
+- [x] Economics (G) Phase 7: wired into the app — two-domain (Earth/Mars) interplanetary partition/reconcile simulator, live §9 determinism check, 65 JS tests total
+- [x] Fixed a real deployed-page bug: `wasm-ledger-adapter.js` was missing from the live GitHub repo (404 on a static import), causing the page to hang on "Initializing…" indefinitely
 - [x] **Economics (G) plan complete** — all 7 phases done: cadence, reward, scarcity, full composed G, cross-implementation parity (found and fixed a real materialization-order gap), deliberate counterexample, wired into the app
 - [x] Hosting switched from Firebase to GitHub Pages (see Changelog)
 - [x] WASM wiring logic: `WasmLedgerAdapter` translates the raw Rust wasm-bindgen surface to the exact interface `main.js`/economics reducers use; `createLedger()`'s backend selection is tested end to end against a faithful fake of that surface (found and fixed two real shape mismatches: `topoOrderJson()` string vs `topoOrder()` array, `size()` method vs `size` getter). 49 JS tests total.
@@ -589,3 +602,27 @@ previous update to this README.)
   guard) and added Appendix H.9 documenting both phases' evidence. 7 new
   tests (4 + 2 + 1 across the new files; **this completes all 5 phases
   of the Conservation development plan**). 62 JS / 51 Rust tests total.
+- **Diagnosed and fixed a real live-deployment bug**, not a local one:
+  the deployed page was stuck on "Initializing…" with an empty table.
+  Checked the actual repo content directly
+  (`raw.githubusercontent.com/theodoreyong9/AIWA/main/...`, HTTP status
+  per file) rather than guessing — `public/js/core/wasm-ledger-adapter.js`
+  was returning 404. `ledger-bridge.js` statically imports it; a failed
+  static import breaks the whole module graph before `main()` ever runs,
+  so no exception ever reaches its `.catch()` — the page just hangs on
+  its initial text, silently, which is why the console showed nothing
+  informative. Root cause: the file didn't make it into the repo when
+  delivered as an individual download in an earlier turn.
+- **Rebuilt the app demo (`main.js`/`index.html`) around the whitepaper's
+  actual central claim** instead of a generic single-domain balance
+  table: two independent domains, Earth and Mars, each with their own
+  `EventDag`. Partitioned is the UI's *default* state, not an error
+  state. `Commit` / `Claim reward` make §10's "reward requires elapsed
+  cadence epochs, never instant" visible as an interaction, not just a
+  formula. `Reconcile` merges both domains' full histories and then
+  *checks* — logs pass/fail, doesn't just assert — that both replicas
+  converge to an identical view, which is §9's determinism claim
+  exercised live rather than only tested in CI. `tests/main-demo.test.mjs`
+  rewritten to pin this scenario (Earth=20, Mars=10, converges to
+  `{earth:20, mars:10}`, 7 events both sides). 65 JS / 51 Rust tests
+  total.
