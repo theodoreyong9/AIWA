@@ -17,12 +17,21 @@
 
 import { createLedger } from '../core/ledger-bridge.js';
 import { materializeG } from '../core/economics/g.js';
+import { loadSolanaWeb3, generateKeypair, keypairFromSecretKey, encryptSecretKey, decryptSecretKey } from '../core/identity/solana-wallet.js';
+import { registerDomainViaBurn } from '../core/identity/identity-flow.js';
+import { initialIdentityCostState, hasIdentityCost } from '../core/identity/identity-cost.js';
+import { SOLANA_NETWORKS, DEFAULT_NETWORK } from '../core/identity/solana-networks.js';
+
+const MIN_BURN_LAMPORTS = 100_000; // 0.0001 SOL — matches the "Register identity" button's label
+const WALLET_STORAGE_PREFIX = 'aiwa-wallet-';
 
 const statusEl = document.getElementById('status');
 const linkStatusEl = document.getElementById('link-status');
 const toggleLinkBtn = document.getElementById('toggle-link-btn');
 const reconcileBtn = document.getElementById('reconcile-btn');
 const logListEl = document.getElementById('log-list');
+const networkSelectEl = document.getElementById('network-select');
+const networkWarningEl = document.getElementById('network-warning');
 
 const theta = {
   reward: { K: 1, alpha: 1, beta: 1 },
@@ -38,6 +47,7 @@ class DomainReplica {
     this.lastCadenceId = null;
     this.epoch = 0;
     this.pending = []; // [{ b, q0 }] — committed but not yet claimed
+    this.keypair = null; // set once a wallet is created/unlocked
   }
 
   async advanceCadence() {
@@ -84,6 +94,12 @@ class DomainReplica {
 
 let linked = false;
 let earth, mars;
+let identityState = initialIdentityCostState();
+let solanaWeb3 = null; // loaded lazily on first wallet action
+
+function currentNetwork() {
+  return networkSelectEl.value || DEFAULT_NETWORK;
+}
 
 function log(msg) {
   const line = document.createElement('div');
@@ -112,6 +128,25 @@ function renderDomain(replica) {
     console.log(`[${domain}] cadence rejections:`, state.cadence.rejections);
     console.log(`[${domain}] accrual rejections:`, state.accrualRejections);
   }
+
+  // Identity/gating (§24/§26): Commit and Claim only make economic
+  // sense once a domain has paid a real identity cost — see the
+  // "Identity cost" section of README.md for the full rationale.
+  const registered = hasIdentityCost(identityState, domain);
+  const identityStatusEl = document.getElementById(`${domain}-identity-status`);
+  identityStatusEl.textContent = registered
+    ? `✅ Registered — burned ${identityState.registered[domain].burnedLamports} lamports`
+    : replica.keypair
+      ? `🔓 Wallet ready (${replica.keypair.publicKey.toBase58().slice(0, 8)}…) — not registered`
+      : '🔒 No wallet';
+  identityStatusEl.className = `identity-status ${registered ? 'registered' : 'unregistered'}`;
+
+  const burnBtn = document.querySelector(`.burn-btn[data-domain="${domain}"]`);
+  burnBtn.disabled = !replica.keypair || registered;
+
+  document.querySelector(`.commit-btn[data-domain="${domain}"]`).disabled = !registered;
+  document.querySelector(`.claim-btn[data-domain="${domain}"]`).disabled = !registered;
+  document.getElementById(`${domain}-gated-hint`).style.display = registered ? 'none' : 'block';
 }
 
 function renderAll() {
@@ -121,6 +156,13 @@ function renderAll() {
   linkStatusEl.className = linked ? 'up' : 'down';
   toggleLinkBtn.textContent = linked ? 'Cut link' : 'Restore link';
   reconcileBtn.disabled = !linked;
+
+  const network = currentNetwork();
+  const config = SOLANA_NETWORKS[network];
+  networkWarningEl.className = config.isRealCost ? 'mainnet' : '';
+  networkWarningEl.innerHTML = config.isRealCost
+    ? '⚠️ Mainnet mode: burns use <strong>real SOL</strong> and are <strong>irreversible</strong>. Real money.'
+    : 'Devnet mode: burns use free faucet SOL and provide <strong>no real Sybil resistance</strong> (§24). Use this to test the mechanism only.';
 }
 
 async function reconcile() {
@@ -148,6 +190,85 @@ async function reconcile() {
       : `Convergence check FAILED — Earth sees Mars=${marsBalanceFromEarth}, Mars sees itself=${marsBalanceFromMars}. This would be a real bug.`
   );
 
+  renderAll();
+}
+
+function walletStorageKey(domain) {
+  return `${WALLET_STORAGE_PREFIX}${domain}`;
+}
+
+async function ensureSolanaWeb3() {
+  if (!solanaWeb3) {
+    solanaWeb3 = await loadSolanaWeb3();
+  }
+  return solanaWeb3;
+}
+
+function setIdentityMsg(domain, text, kind) {
+  const el = document.getElementById(`${domain}-identity-msg`);
+  el.textContent = text;
+  el.className = `identity-msg ${kind ?? ''}`;
+}
+
+/**
+ * Creates a brand-new wallet for `replica`'s domain, encrypts it with
+ * the given password, and persists the encrypted record to
+ * localStorage — a real, working key, not a placeholder. The plaintext
+ * secret key never touches storage; only encryptSecretKey()'s output
+ * does.
+ */
+async function createWallet(replica, password) {
+  const web3 = await ensureSolanaWeb3();
+  const keypair = generateKeypair(web3);
+  const record = await encryptSecretKey(keypair.secretKey, password);
+  localStorage.setItem(walletStorageKey(replica.name), JSON.stringify(record));
+  replica.keypair = keypair;
+}
+
+/** Unlocks a previously-created wallet from localStorage with the given password. */
+async function unlockWallet(replica, password) {
+  const raw = localStorage.getItem(walletStorageKey(replica.name));
+  if (!raw) throw new Error('No saved wallet for this domain — create one first.');
+  const web3 = await ensureSolanaWeb3();
+  const record = JSON.parse(raw);
+  const secretKey = await decryptSecretKey(record, password);
+  replica.keypair = keypairFromSecretKey(web3, secretKey);
+}
+
+/**
+ * Registers `replica`'s domain by burning MIN_BURN_LAMPORTS on the
+ * currently-selected network. This sends a real transaction once
+ * deployed and run in an actual browser — see identity-flow.js and
+ * README.md's "Identity cost" section for exactly what is and isn't
+ * verified in this development sandbox.
+ */
+async function registerIdentity(replica) {
+  const network = currentNetwork();
+  const config = SOLANA_NETWORKS[network];
+  const solAmount = MIN_BURN_LAMPORTS / 1_000_000_000;
+
+  const confirmed = confirm(
+    `Burn ${solAmount} SOL on ${config.label}?\n\n` +
+      `This is sent to the network's incinerator address and is irreversible.\n` +
+      (config.isRealCost ? 'This is REAL money on mainnet.' : 'This is free devnet SOL — no real cost, testing only.')
+  );
+  if (!confirmed) return;
+
+  const web3 = await ensureSolanaWeb3();
+  setIdentityMsg(replica.name, 'Broadcasting burn transaction…');
+  try {
+    const result = await registerDomainViaBurn(web3, replica.keypair, identityState, {
+      domain: replica.name,
+      lamports: MIN_BURN_LAMPORTS,
+      network,
+    });
+    identityState = result.state;
+    setIdentityMsg(replica.name, `✅ Registered — tx ${result.signature.slice(0, 12)}…`, 'success');
+    log(`[${replica.name}] identity registered via burn — tx ${result.signature}`);
+  } catch (err) {
+    setIdentityMsg(replica.name, `❌ ${err.message}`, 'error');
+    log(`[${replica.name}] identity registration failed: ${err.message}`);
+  }
   renderAll();
 }
 
@@ -192,6 +313,50 @@ async function main() {
       renderAll();
     });
   });
+
+  document.querySelectorAll('.wallet-create-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const domain = btn.dataset.domain;
+      const replica = domain === 'earth' ? earth : mars;
+      const pwInput = document.getElementById(`${domain}-wallet-pw`);
+      if (!pwInput.value) return setIdentityMsg(domain, 'Enter a password first.', 'error');
+      try {
+        await createWallet(replica, pwInput.value);
+        setIdentityMsg(domain, `Wallet created: ${replica.keypair.publicKey.toBase58()}`, 'success');
+        log(`[${domain}] wallet created — ${replica.keypair.publicKey.toBase58()}`);
+      } catch (err) {
+        setIdentityMsg(domain, `❌ ${err.message}`, 'error');
+      }
+      renderAll();
+    });
+  });
+
+  document.querySelectorAll('.wallet-unlock-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const domain = btn.dataset.domain;
+      const replica = domain === 'earth' ? earth : mars;
+      const pwInput = document.getElementById(`${domain}-wallet-pw`);
+      try {
+        await unlockWallet(replica, pwInput.value);
+        setIdentityMsg(domain, `Wallet unlocked: ${replica.keypair.publicKey.toBase58()}`, 'success');
+        log(`[${domain}] wallet unlocked — ${replica.keypair.publicKey.toBase58()}`);
+      } catch (err) {
+        setIdentityMsg(domain, `❌ ${err.message}`, 'error');
+      }
+      renderAll();
+    });
+  });
+
+  document.querySelectorAll('.burn-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const domain = btn.dataset.domain;
+      const replica = domain === 'earth' ? earth : mars;
+      if (!replica.keypair) return setIdentityMsg(domain, 'Create or unlock a wallet first.', 'error');
+      registerIdentity(replica);
+    });
+  });
+
+  networkSelectEl.addEventListener('change', renderAll);
 
   toggleLinkBtn.addEventListener('click', () => {
     linked = !linked;
