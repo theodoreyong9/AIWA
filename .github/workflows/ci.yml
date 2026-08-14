@@ -52,6 +52,18 @@ jobs:
       - name: Verify G parity
         run: ./scripts/verify-g-parity.sh
 
+  conservation-parity:
+    name: JS / Rust conservation parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify conservation parity
+        run: ./scripts/verify-conservation-parity.sh
+
   wasm-build:
     name: Build WASM package
     runs-on: ubuntu-latest
