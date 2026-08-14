@@ -508,7 +508,11 @@ argument as §8.1 but for the function that orders events for folding,
 not the one that encodes them), with evidence in **Appendix H.7**; and
 **Appendix H.8**, which promotes §10's wall-clock-vs-cadence argument
 (previously asserted only in prose) to an executed deliberate
-counterexample, in the spirit of §20–22.
+counterexample, in the spirit of §20–22; and **§24.6(v)** / **Appendix
+H.10**, documenting the SOL-burn `c_id` mechanism as a fifth,
+newly-implemented identity-cost class alongside the four already
+discussed in prose — including the devnet/mainnet distinction as the
+mechanism's actual validity condition, not a footnote.
 
 **Fixed**: the paper's body text previously cited "Appendix J.1–J.3" for
 the four experiments in §20–22, while the document only ever defined an
@@ -762,3 +766,16 @@ previous update to this README.)
   in the DOM until a domain's identity cost is registered — enforced at
   the UI layer, not just asserted in docs. 6 new tests
   (`solana-networks.test.mjs`; 87 JS / 60 Rust total).
+- Caught the whitepaper falling out of sync: the SOL-burn `c_id`
+  mechanism (built across several turns, wallet included) was never
+  documented in the paper itself. Added **§24.6(v)** as a fifth
+  identity-cost mechanism class alongside the four already discussed in
+  prose (updated "Four mechanism classes" → "Five", and "all four
+  mechanisms" → "all five" where the surrounding text generalized over
+  them), positioned explicitly relative to (i) and (ii) — sunk-cost like
+  (ii), chosen over (i) for the same enforcement-under-partition
+  weakness §24.6(i) already states about itself — and stating the
+  devnet/mainnet distinction as the mechanism's actual validity
+  condition. Added **Appendix H.10** documenting exactly what's real,
+  tested code versus what remains an unverified network boundary in this
+  sandbox, matching the same discipline already used for H.5–H.9.
