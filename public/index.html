@@ -6,11 +6,38 @@
   <title>AIWA — Autonomous Interplanetary Web Application</title>
   <meta name="description" content="AIWA: reference architecture for identity, modular applications, and value accrual under arbitrarily long communication partition." />
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
-    table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; }
-    th, td { text-align: left; padding: 0.35rem 0.6rem; border-bottom: 1px solid #ddd; font-variant-numeric: tabular-nums; }
-    th { font-weight: 600; }
-    #status, #rejections { color: #555; font-size: 0.9rem; }
+    :root {
+      --link-up: #1a8a4a; --link-down: #b33; --bg-panel: #f7f7f8; --border: #ddd;
+    }
+    body { font-family: system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { margin-bottom: 0.1rem; }
+    #status { color: #555; font-size: 0.9rem; }
+    #explainer { color: #444; font-size: 0.92rem; line-height: 1.5; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; margin: 1rem 0; }
+
+    #link-bar { display: flex; align-items: center; gap: 0.6rem; margin: 1.2rem 0; flex-wrap: wrap; }
+    #link-status { font-weight: 600; }
+    #link-status.up { color: var(--link-up); }
+    #link-status.down { color: var(--link-down); }
+    button { font: inherit; padding: 0.4rem 0.8rem; border-radius: 6px; border: 1px solid #999; background: #fff; cursor: pointer; }
+    button:hover { background: #f0f0f0; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #reconcile-btn { font-weight: 600; }
+
+    #domains { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 34rem) { #domains { grid-template-columns: 1fr; } }
+    .domain-panel { border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; }
+    .domain-panel h2 { margin: 0 0 0.2rem; font-size: 1.05rem; }
+    .domain-panel .subtitle { color: #777; font-size: 0.78rem; margin-bottom: 0.6rem; }
+    .stat-row { display: flex; justify-content: space-between; padding: 0.2rem 0; font-variant-numeric: tabular-nums; font-size: 0.92rem; border-bottom: 1px solid #eee; }
+    .stat-row span:first-child { color: #666; }
+    .domain-actions { display: flex; gap: 0.4rem; margin-top: 0.7rem; flex-wrap: wrap; }
+    .domain-actions button { flex: 1; font-size: 0.82rem; padding: 0.4rem 0.3rem; }
+    .rejections { color: #999; font-size: 0.75rem; margin-top: 0.5rem; }
+
+    #log { margin-top: 1.3rem; }
+    #log h2 { font-size: 0.95rem; margin-bottom: 0.3rem; }
+    #log-list { font-family: ui-monospace, monospace; font-size: 0.78rem; color: #555; max-height: 9rem; overflow-y: auto; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.7rem; }
+    #log-list div { padding: 0.1rem 0; }
   </style>
 </head>
 <body>
@@ -19,16 +46,61 @@
     <p>Autonomous Interplanetary Web Application</p>
     <p id="status">Initializing…</p>
 
-    <section id="economics">
-      <h2>Materialized economic view — A = G(H<sub>d</sub>, θ)</h2>
-      <table id="domains-table">
-        <thead>
-          <tr><th>Domain</th><th>Epoch</th><th>Balance</th><th>Budget used</th></tr>
-        </thead>
-        <tbody id="domains-body"></tbody>
-      </table>
-      <p id="rejections"></p>
-    </section>
+    <div id="explainer">
+      Two domains, Earth and Mars, each run their <strong>own local ledger</strong>.
+      While the link is down, they accrue value independently — no coordination
+      required, by design (§9 of the whitepaper). "Commit" records a resource
+      claim at the current epoch; "Claim reward" posts it to the ledger —
+      reward grows with cadence epochs elapsed <em>between</em> the two,
+      never instantly (§10). Reconciling merges both histories; convergence
+      is deterministic, not negotiated.
+    </div>
+
+    <div id="link-bar">
+      <span>Link:</span>
+      <span id="link-status" class="down">🔴 Down (partitioned)</span>
+      <button id="toggle-link-btn">Restore link</button>
+      <button id="reconcile-btn" disabled>🔄 Reconcile</button>
+    </div>
+
+    <div id="domains">
+      <section class="domain-panel" id="panel-earth">
+        <h2>🌍 Earth</h2>
+        <div class="subtitle">domain: earth</div>
+        <div class="stat-row"><span>Cadence epoch</span><span id="earth-epoch">0</span></div>
+        <div class="stat-row"><span>Balance</span><span id="earth-balance">0</span></div>
+        <div class="stat-row"><span>Budget used</span><span id="earth-budget">0 / 1000</span></div>
+        <div class="stat-row"><span>Local events</span><span id="earth-events">0</span></div>
+        <div class="stat-row"><span>Pending commits</span><span id="earth-pending">0</span></div>
+        <div class="domain-actions">
+          <button data-domain="earth" class="advance-btn">+ Cadence epoch</button>
+          <button data-domain="earth" class="commit-btn">Commit (b=10)</button>
+          <button data-domain="earth" class="claim-btn">Claim reward</button>
+        </div>
+        <p class="rejections" id="earth-rejections"></p>
+      </section>
+
+      <section class="domain-panel" id="panel-mars">
+        <h2>🔴 Mars</h2>
+        <div class="subtitle">domain: mars</div>
+        <div class="stat-row"><span>Cadence epoch</span><span id="mars-epoch">0</span></div>
+        <div class="stat-row"><span>Balance</span><span id="mars-balance">0</span></div>
+        <div class="stat-row"><span>Budget used</span><span id="mars-budget">0 / 1000</span></div>
+        <div class="stat-row"><span>Local events</span><span id="mars-events">0</span></div>
+        <div class="stat-row"><span>Pending commits</span><span id="mars-pending">0</span></div>
+        <div class="domain-actions">
+          <button data-domain="mars" class="advance-btn">+ Cadence epoch</button>
+          <button data-domain="mars" class="commit-btn">Commit (b=10)</button>
+          <button data-domain="mars" class="claim-btn">Claim reward</button>
+        </div>
+        <p class="rejections" id="mars-rejections"></p>
+      </section>
+    </div>
+
+    <div id="log">
+      <h2>Event log</h2>
+      <div id="log-list"></div>
+    </div>
   </main>
 
   <script type="module" src="./js/app/main.js"></script>
