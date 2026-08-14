@@ -1,11 +1,13 @@
 # Rust
 rust-core/target/
 
+# Node test-only devDependencies (see package.json — not used by the
+# deployed app, which loads @solana/web3.js from a CDN instead)
+node_modules/
+package-lock.json
+
 # WASM build output copied into public/
 public/js/wasm/
-
-# Node (wasm-pack may use it locally)
-node_modules/
 
 # OS
 .DS_Store
