@@ -1,7 +1,8 @@
 {
   "name": "aiwa-reference-tests",
   "private": true,
-  "description": "Test-only devDependencies for AIWA's JS test suite. The deployed app (public/) has NO build step and loads @solana/web3.js from a CDN at runtime (see solana-wallet.js's loadSolanaWeb3()) — this package.json exists solely so tests/solana-wallet.test.mjs can exercise the real library offline, with real transaction construction/signing, rather than a hand-rolled fake.",
+  "type": "module",
+  "description": "Test-only devDependencies for AIWA's JS test suite. The deployed app (public/) has NO build step and loads @solana/web3.js from a CDN at runtime (see solana-wallet.js's loadSolanaWeb3()) — this package.json exists solely so tests/solana-wallet.test.mjs can exercise the real library offline, with real transaction construction/signing, rather than a hand-rolled fake. \"type\": \"module\" only affects how Node resolves these .js files during testing — it has no effect on the deployed app, which the browser loads directly and knows nothing about this file.",
   "scripts": {
     "test": "node --test tests/*.test.mjs"
   },
