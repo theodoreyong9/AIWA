@@ -1,0 +1,11 @@
+# Rust
+rust-core/target/
+
+# WASM build output copied into public/
+public/js/wasm/
+
+# Node (wasm-pack may use it locally)
+node_modules/
+
+# OS
+.DS_Store
