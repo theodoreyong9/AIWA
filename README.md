@@ -22,7 +22,7 @@ themselves — see "Cross-language id parity" below.
 
 ```
 AIWA/
-├── public/                  ← Firebase Hosting root
+├── public/                  ← GitHub Pages root (deployed via .github/workflows/deploy-pages.yml)
 │   ├── index.html
 │   └── js/
 │       ├── app/
@@ -74,9 +74,9 @@ AIWA/
 │   └── verify-g-parity.sh    ← runs both and semantically diffs the output
 ├── docs/
 │   └── AIWA_whitepaper_v1_2_revised.md  ← whitepaper, kept in sync with the implementation
-├── .github/workflows/ci.yml  ← Rust tests + parity check + real WASM build
-├── firebase.json
-├── .firebaserc.example       ← rename to .firebaserc with your project id
+├── .github/workflows/
+│   ├── ci.yml           ← Rust tests + parity checks + real WASM build
+│   └── deploy-pages.yml ← deploys public/ to GitHub Pages on push to main
 └── .gitignore
 ```
 
@@ -199,18 +199,19 @@ real reward function rather than a hypothetical one.
 - **Phase 7 — Wire into the app.** Minimal display in `main.js`: balance
   per domain, epoch, cumulative issuance.
 
-## Deploy the minimal page to Firebase (right now)
+## Deploy to GitHub Pages
 
-```bash
-npm install -g firebase-tools   # one time
-firebase login
-cp .firebaserc.example .firebaserc
-# edit .firebaserc with your Firebase project id
-firebase deploy --only hosting
-```
+Everything lives in this GitHub repo; no separate hosting account needed.
 
-This deploys `public/` as-is — `index.html` + the pure JS DAG, without
-waiting for the Rust core to be ready.
+One-time setup (repo settings, not a command):
+
+1. GitHub repo → **Settings → Pages**
+2. Under "Build and deployment", set **Source** to **GitHub Actions**
+
+That's it. `.github/workflows/deploy-pages.yml` deploys `public/` on
+every push to `main` (and can also be triggered manually from the
+Actions tab). No build step — it's the same pure JS `public/` directory
+described above, deployed as-is.
 
 ## Rust core: tests and build
 
@@ -418,3 +419,9 @@ previous update to this README.)
   wall-clock-vs-cadence argument, previously only asserted in prose, to
   an executed proof — new Appendix H.8, annotated inline at §10. 4 new
   tests (2 JS + 2 Rust; full suite now 39 JS / 39 Rust).
+- Switched hosting from Firebase to GitHub Pages, per request: removed
+  `firebase.json` and `.firebaserc.example`, added
+  `.github/workflows/deploy-pages.yml` (deploys `public/` on push to
+  `main`), and updated this README's deploy instructions accordingly. No
+  code in `public/` changed — the switch is purely about where the same
+  static files get served from.
