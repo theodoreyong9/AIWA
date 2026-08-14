@@ -38,30 +38,10 @@ export class WasmLedgerAdapter {
     this._raw = rawWasmEventDag;
   }
 
-  /**
-   * Matches EventDag#addEvent's signature and semantics exactly (async,
-   * same parameter order, same return type), even though the underlying
-   * Rust call is synchronous — `await`ing a non-promise value resolves
-   * immediately, so callers do not need to know which is which.
-   *
-   * @param {string[]} parents
-   * @param {object} payload
-   * @returns {Promise<string>}
-   */
   async addEvent(parents, payload) {
-    // wasm-bindgen converts a plain JS object argument to serde_json::Value
-    // on the Rust side automatically (via serde-wasm-bindgen in
-    // dag.rs's add_event) — payload is passed through as-is, not
-    // JSON.stringify'd here.
     return this._raw.addEvent(parents, payload);
   }
 
-  /**
-   * @param {WasmLedgerAdapter} other another WasmLedgerAdapter — merging
-   *   a pure-JS EventDag into a WASM-backed one (or vice versa) is not
-   *   supported, matching the Rust side's `fn merge(&mut self, other:
-   *   &EventDag)`, which requires the same concrete type.
-   */
   merge(other) {
     if (!(other instanceof WasmLedgerAdapter)) {
       throw new TypeError('WasmLedgerAdapter#merge only accepts another WasmLedgerAdapter (backend mismatch).');
@@ -73,13 +53,6 @@ export class WasmLedgerAdapter {
     return this._raw.size();
   }
 
-  /**
-   * Bridges topoOrderJson()'s JSON string to the array shape
-   * EventDag#topoOrder() returns directly, so callers never need an
-   * `if backend === 'wasm'` branch.
-   *
-   * @returns {Array<{ id: string, parents: string[], payload: any }>}
-   */
   topoOrder() {
     return JSON.parse(this._raw.topoOrderJson());
   }
