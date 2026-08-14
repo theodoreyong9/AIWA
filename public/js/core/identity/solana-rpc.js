@@ -1,0 +1,81 @@
+// solana-rpc.js — the actual network call to Solana mainnet. This file
+// CANNOT be exercised or verified from this project's development
+// sandbox: outbound network access here is restricted to a fixed
+// allowlist of package-registry domains and does not include Solana RPC
+// endpoints — the exact same limitation documented in README.md for why
+// the real wasm32 build can't be produced locally either. Its
+// correctness depends on matching Solana's real JSON-RPC response
+// shape, which has been implemented carefully against the documented
+// API, but has NOT been exercised against a live response from this
+// environment. Treat this file as unverified until it's actually run in
+// a browser against mainnet.
+//
+// Everything testable (the actual accept/reject logic) lives in
+// identity-cost.js and is fully covered there — this file's only job is
+// producing the NormalizedBurnTx shape that verifyBurnProof() expects,
+// from a real transaction signature.
+
+import { SOLANA_INCINERATOR_ADDRESS } from './identity-cost.js';
+
+const DEFAULT_RPC_ENDPOINT = 'https://api.mainnet-beta.solana.com';
+
+/**
+ * Fetches a transaction at 'finalized' commitment and normalizes it
+ * into the shape identity-cost.js's verifyBurnProof() expects.
+ * Requesting 'finalized' commitment specifically means: if this returns
+ * a non-null result at all, the transaction is already irreversible —
+ * there is no separate "confirmationStatus" field to re-check
+ * afterward, the commitment level of the request itself IS the
+ * finality guarantee.
+ *
+ * @param {string} signature
+ * @param {{ rpcEndpoint?: string }} [opts]
+ * @returns {Promise<import('./identity-cost.js').NormalizedBurnTx | null>}
+ *   null if the transaction isn't found (not yet finalized, or doesn't exist)
+ */
+export async function fetchNormalizedBurnTx(signature, { rpcEndpoint = DEFAULT_RPC_ENDPOINT } = {}) {
+  const response = await fetch(rpcEndpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getTransaction',
+      params: [signature, { commitment: 'finalized', maxSupportedTransactionVersion: 0 }],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Solana RPC request failed: HTTP ${response.status}`);
+  }
+
+  const { result, error } = await response.json();
+  if (error) {
+    throw new Error(`Solana RPC error: ${error.message ?? JSON.stringify(error)}`);
+  }
+  if (!result) {
+    return null; // not found at finalized commitment
+  }
+
+  const accountKeys = result.transaction.message.accountKeys.map((k) => (typeof k === 'string' ? k : k.pubkey));
+  const incineratorIndex = accountKeys.indexOf(SOLANA_INCINERATOR_ADDRESS);
+  if (incineratorIndex === -1) {
+    // Transaction exists but never touches the incinerator address at all.
+    return {
+      signature,
+      err: result.meta.err,
+      incineratorBalanceDeltaLamports: 0,
+      commitment: 'finalized',
+    };
+  }
+
+  const pre = result.meta.preBalances[incineratorIndex];
+  const post = result.meta.postBalances[incineratorIndex];
+
+  return {
+    signature,
+    err: result.meta.err,
+    incineratorBalanceDeltaLamports: post - pre,
+    commitment: 'finalized',
+  };
+}
