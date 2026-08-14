@@ -1,8 +1,10 @@
+mod conservation;
 mod core;
 mod dag;
 mod economics;
 mod event;
 
+pub use conservation::{identity_derivation, Claim, ClaimStatus, ConservationError, ConservationState, DerivationFn, Proof};
 pub use core::EventDagCore;
 pub use dag::EventDag;
 pub use economics::{
