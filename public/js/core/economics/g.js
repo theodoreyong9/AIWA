@@ -4,37 +4,40 @@
 // event list. This module adds no new economic rule of its own — it is
 // purely the composition.
 //
-// θ here is { reward: { K, alpha, beta }, budgets: { [domain]: number|null } }.
+// θ here is { reward: { alpha, beta, gamma, C, minQ }, budgets: { [domain]: number|null } }
+// — the real Proof-of-Will reward structure (reward.js), not the
+// earlier simpler power-law form.
 //
 // Event types recognized:
 //   - 'cadence': delegated entirely to cadence.js's reducer.
-//   - 'accrual': { domain, b, q0 } — a claim of committed resource b at
-//     acceptance epoch q0. q is derived from the domain's current
-//     cadence epoch *as folded so far* (i.e. by every cadence event that
-//     topologically precedes this accrual event), not from any external
-//     clock — this is the whole point of §10's cadence-derived economic
-//     time. The requested reward is computed and then handed to the
-//     scarcity reducer, which may clamp it; only the clamped, *issued*
-//     amount is added to the domain's balance.
+//   - 'accrual': { domain, b, q0, T } — a claim of committed resource b
+//     at acceptance epoch q0, with caller-chosen patience rate T (§10's
+//     reward.js; clamped to [0, 0.4] inside reward() itself, so an
+//     out-of-range or missing T here is not rejected — it is folded
+//     through unchanged and clamped at the point of use, matching the
+//     original formula's own Math.min(tr,40)/100 behavior). q is
+//     derived from the domain's current cadence epoch *as folded so
+//     far*, never from any external clock (§10). qTotal (this domain's
+//     own total epoch count — reward.js's domain-local stand-in for the
+//     original's global "protocol age," see reward.js's header) is read
+//     from the same folded cadence state. The requested reward is
+//     computed and then handed to the scarcity reducer, which may clamp
+//     it; only the clamped, *issued* amount is added to the domain's
+//     balance.
 //   - anything else (e.g. 'genesis'): passed through unchanged.
 //
-// Lemma 1 (§11) note: this module does not need its own identity
-// safety check. Because the underlying DAG's event id is a hash of the
-// full canonicalized payload (§8, §8.1), and an accrual event's payload
-// here always carries q0 as part of that payload, two accrual events
-// that are economically distinct (different q0, hence generally
-// different reward) cannot share an id — the strong-identity condition
-// Lemma 1 requires falls out of §8's existing id scheme for free, as
-// long as callers always include q0 in the payload. Omitting q0 from
-// the payload while relying on it implicitly would reintroduce exactly
-// the §11/§22 weak-identity failure — see tests/lemma1.test.mjs.
+// Lemma 1 (§11) note: unchanged from the prior revision — an accrual
+// event's payload still always carries q0, which is still what the
+// strong-identity guarantee rests on. T's addition to the payload only
+// strengthens this: two claims differing only in patience rate are now
+// also distinguishable by id, not merely by q0.
 
 import { initialCadenceState, applyCadenceEvent } from './cadence.js';
-import { reward, elapsedEpochs } from './reward.js';
+import { reward, elapsedEpochs, domainAge } from './reward.js';
 import { initialScarcityState, applyIssuanceAttempt } from './scarcity.js';
 
 /**
- * @typedef {{ K: number, alpha: number, beta: number }} RewardParams
+ * @typedef {{ alpha: number, beta: number, gamma: number, C: number, minQ: number }} RewardParams
  * @typedef {{ reward: RewardParams, budgets: Record<string, number | null> }} Theta
  * @typedef {{
  *   cadence: import('./cadence.js').CadenceState,
@@ -77,7 +80,7 @@ export function applyGEvent(theta, state, event) {
     return state; // e.g. 'genesis' — not this reducer's concern
   }
 
-  const { domain, b, q0 } = payload;
+  const { domain, b, q0, T } = payload;
   const reject = (reason) => ({
     ...state,
     accrualRejections: [...state.accrualRejections, { eventId: event.id, domain: domain ?? null, reason }],
@@ -91,10 +94,12 @@ export function applyGEvent(theta, state, event) {
   }
 
   const q = elapsedEpochs(state.cadence, domain, q0);
+  const qTotal = domainAge(state.cadence, domain);
+  const patienceRate = Number.isFinite(T) ? T : 0;
 
   let requested;
   try {
-    requested = reward(b, q, theta.reward);
+    requested = reward(b, q, qTotal, patienceRate, theta.reward);
   } catch (err) {
     return reject(`invalid reward inputs: ${err.message}`);
   }
