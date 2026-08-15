@@ -177,11 +177,16 @@ against, which now exists.
   independence (§9), and — in the JS integration test — a simulated
   post-partition merge of two independently-built domains reconciling to
   the same state regardless of merge order.
-- **Phase 2 — Reward function.** ✅ Done. `r(b, q) = K · b^α · q^β`,
+- **Phase 2 — Reward function.** ✅ Done (superseded by the Proof-of-Will
+  revision, see the changelog entry below — kept here for phase-history
+  continuity). `r(b, q, q_total, T) = (b·q^α)/[ln(q_total^(β(1−T))+C)]^γ`,
   implemented identically in `reward.js` / `reward.rs`, plus
-  `elapsedEpochs()` deriving q from the cadence state built in Phase 1
-  (q = current domain epoch − event's acceptance epoch q_0, never
-  negative). Cross-checked against Appendix D.2's worked sub-expression
+  `elapsedEpochs()`/`domainAge()` deriving q and q_total from the
+  cadence state built in Phase 1 (q = current domain epoch − event's
+  acceptance epoch q_0, never negative). Cross-checked against the real
+  reference implementation's own constants (α=1.1, β=2.2, γ=3,
+  C=33³), not against Appendix D.2's worked example, which reflects the
+  earlier power-law form
   (K=1, B=1000, t=1, α=0.5 → ≈31.6227766). 13 new tests (10 JS + 10 Rust,
   overlapping on shared cases), plus `tests/lemma1.test.mjs`: an
   *executable* version of Lemma 1 (§11) — constructs the exact
@@ -672,7 +677,7 @@ previous update to this README.)
 - [ ] Transport (pluggable layer, §25)
 - [x] Modules (§27): open registration, content-addressed code integrity, real iframe sandbox mechanism — 18 JS + 15 Rust tests; closes R19 in the security property registry from "unconfirmed" to "specified and implemented, not adversarially tested" (Appendix H.11)
 - [x] Modules: signed submission pipeline (`module-submission.js`/`module_submission.rs`) — real Ed25519 signing (JS: `@noble/curves`, Rust: `ed25519-dalek`), replay-guarded, hash-checked against actually-fetched code, no economic gate on publishing (by design); 17 new tests
-- [ ] Modules: wired into a UI; the optional §24.3 ψ growth-condition symbolic check (deliberately out of scope, not required by the paper's own pseudocode); automated JS/Rust cross-language parity for the submission signing scheme (assumed correct by field-order matching, not yet verified by a parity script)
+- [ ] Modules: the optional §24.3 ψ growth-condition symbolic check (deliberately out of scope, not required by the paper's own pseudocode); automated JS/Rust cross-language parity for the submission signing scheme (assumed correct by field-order matching, not yet verified by a parity script — see below, being addressed now)
 - [ ] Identity (strong/weak scheme selection UI, §11/§26 custody), AI (§28), presentation (§27.5), conservation-to-economics wiring (§6–7)
 
 ## Changelog
@@ -1033,6 +1038,67 @@ previous update to this README.)
   zero network calls registers correctly; two domains reconciled
   pairwise converge to identical balances while a third, never-merged
   domain stays fully isolated, seeing only itself.
+- **Retraction of the local-PoW entry above.** The premise motivating it
+  — that SOL burn is "impossible" without connectivity — was itself
+  wrong, corrected directly by the user: a burn is never impossible at
+  any distance, only slower to confirm (the transaction is broadcast and
+  eventually reaches the network; confirmation is delayed, not blocked).
+  `local-pow.js`/`local_pow.rs` and their 16 tests were removed rather
+  than kept under a now-incorrect justification. Recorded here, not
+  deleted from history, per this project's own discipline of not hiding
+  what was tried and why it was reconsidered.
+- **Domain identity is derived, not typed.** A further correction: a
+  domain isn't a name a user picks ("Earth", "Mars", a "+ New domain"
+  prompt) — it's derived deterministically from the wallet that backs
+  it (SHA-256 of the public key, truncated). No domain or ledger exists
+  until a wallet does. Verified directly: the same wallet always
+  re-derives the identical id; two independently generated wallets
+  derive distinct ids with no coordination; reconciliation between two
+  such domains, addressed by their real derived hashes, still converges
+  correctly. Contacts now show this hash plus an explicitly
+  informational, editable per-contact delay value, replacing the
+  earlier global boolean "linked/cut" toggle that implied a single
+  whole-system connectivity state the paper never assumes (§9's C(t) is
+  already pairwise). A "create test peer" affordance remains, clearly
+  labeled testing-only, purely to exercise Reconcile within one browser
+  tab — a real second domain is just another device running this same
+  app with its own independently derived identity. New whitepaper
+  §24.6(ii) retraction note and Appendix H.15; 137 JS / 104 Rust tests.
+- **Adopted the real Proof-of-Will reward structure.** `reward.js` and
+  `reward.rs` were rewritten from the earlier power-law form
+  r=K·b^α·q^β to the user's own real mining formula (YourMine's
+  `mine.js`, `calcClaimable()`):
+  r(b,q,q_total,T) = (b·q^α)/[ln(q_total^(β(1−T))+C)]^γ. Two adaptations
+  are deliberate and documented, not silent: q_total (the original's
+  global "protocol age," shared identically by every participant on a
+  single chain) is this domain's own cadence-epoch count here, since
+  requiring AIWA domains to agree on one shared reference epoch would
+  reintroduce the cross-domain synchronization dependency §9 rules out;
+  the original's minimum-30-Solana-slot wait becomes `minQ`, a
+  deployment-chosen epoch count, since AIWA's epoch has no fixed
+  real-time duration. Verified byte-for-byte against the real
+  reference implementation's own constants (α=1.1, β=2.2, γ=3,
+  C=33³=35937): JS and Rust both independently compute
+  `0.11844290947765648` for b=1, q=q_total=100, T=0 — confirmed a third
+  way by running the real EventDag end to end (100 real cadence
+  advances, then one accrual event) rather than only calling the
+  function directly. All dependent tests (cadence-integration, g,
+  g-integration, g-scenario, lemma1, module-rank, the wall-clock
+  counterexample, the parity scripts) were updated and re-verified, not
+  merely left passing by coincidence — g-scenario's fixture, specifically
+  chosen because no accrual in it lands at exactly q=0, was confirmed to
+  still produce identical balances (40, 20) under the new formula.
+  **What this does NOT close, stated as plainly as what it does**:
+  §24.1's Sybil-profit derivation and Appendix C's Lemma 1 divergence
+  experiments were built on the old formula's b^α term; the new
+  formula's b^1 (linear) term changes that algebra in a way noted
+  informally in §10 but not yet rigorously re-derived. The deployed
+  `module-registry.js` validation (§27.2) still enforces the old
+  formula's α≤1 check, unexamined against the new one. Both flagged as
+  open work in the whitepaper (§10, §24.1, §27.2, Appendix D.2,
+  Appendix H.14) rather than silently assumed to still hold. 145 JS /
+  112 Rust tests at that point (before the local-PoW retraction above
+  brought the count back down).
 - Also fixed two UI confusions flagged directly: removed the duplicate
   quick "Register a module" shortcut from the Domain screen (it bypassed
   the real signed/hash-checked pipeline) — Commit → Submit plugin code
@@ -1046,3 +1112,17 @@ previous update to this README.)
   `ln` term (asked about directly) could not be verified against the
   original source, which is no longer reliably in context after this
   session's length — flagged rather than guessed at.
+- Closed the JS/Rust submission-signing parity gap flagged in Appendix
+  H.11: `scripts/check-submission-parity-sign-js.mjs` +
+  `rust-core/examples/verify_submission_from_js.rs` (JS signs, Rust
+  verifies) and `rust-core/examples/sign_submission_rust.rs` +
+  `scripts/verify-submission-from-rust.mjs` (Rust signs, JS verifies),
+  orchestrated by `scripts/verify-submission-parity.sh`. Both directions
+  pass with real, freshly-generated Ed25519 keypairs each run — not
+  fixed fixtures. Confirmed the check actually discriminates (not a
+  trivial always-pass) by deliberately tampering a signed event's
+  `codeUrl` and verifying the corresponding verification step fails
+  with the expected exit code. Whitepaper's H.11.1 updated from "not
+  yet" to "demonstrated." 137 JS / 104 Rust unit tests unaffected (this
+  was new integration tooling, not a change to reward.js/g.js's already
+  re-verified logic).
