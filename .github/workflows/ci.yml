@@ -3,6 +3,12 @@ name: CI
 on:
   push:
     branches: [main]
+    # A commit that only updates the compiled WASM output (pushed back
+    # automatically by wasm-build below) must not re-trigger the whole
+    # suite, including wasm-build itself — that would be an infinite
+    # loop: build -> commit -> push -> triggers build -> commit -> ...
+    paths-ignore:
+      - 'public/js/wasm/**'
   pull_request:
     branches: [main]
 
@@ -69,6 +75,10 @@ jobs:
   wasm-build:
     name: Build WASM package
     runs-on: ubuntu-latest
+    # Needed to push the compiled output back to main below. Only
+    # granted here, not workflow-wide — every other job stays read-only.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -84,3 +94,18 @@ jobs:
         with:
           name: aiwa-wasm
           path: public/js/wasm/
+      - name: Commit compiled WASM back to main
+        # Only on an actual push to main, never on a pull_request build
+        # (a PR from a fork has no push rights, and shouldn't silently
+        # commit to main anyway).
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/js/wasm/
+          if git diff --staged --quiet; then
+            echo "WASM output unchanged, nothing to commit."
+          else
+            git commit -m "chore: update compiled WASM package (automated)"
+            git push
+          fi
