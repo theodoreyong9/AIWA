@@ -6,7 +6,10 @@ mod event;
 mod identity;
 mod modules;
 
-pub use conservation::{identity_derivation, Claim, ClaimStatus, ConservationError, ConservationState, DerivationFn, Proof};
+pub use conservation::{
+    apply_conservation_event, identity_derivation, materialize_conservation, Claim, ClaimStatus,
+    ConservationError, ConservationState, DerivationFn, Proof,
+};
 pub use core::EventDagCore;
 pub use dag::EventDag;
 pub use economics::{
