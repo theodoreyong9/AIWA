@@ -47,6 +47,7 @@ AIWA/
 │       │   └── modules/
 │       │       ├── module-hash.js       ← §27.4 content-addressing for module code — pure, tested
 │       │       ├── module-registry.js   ← §27.1/§27.2 open registration + economic validation — pure, tested
+│       │       ├── module-registry-reducer.js ← registry as a materialized view over H_d — propagates via merge(), fixes a real gap the user found
 │       │       ├── module-submission.js ← signed submission pipeline: replay guard + signature + hash re-check — pure, tested against real Ed25519
 │       │       ├── module-fetch.js      ← real fetch(codeUrl) + submission — untestable in this sandbox
 │       │       └── module-sandbox.js    ← §27.4 real iframe isolation — untestable in this sandbox
@@ -80,6 +81,7 @@ AIWA/
 │           ├── mod.rs               ← re-exports
 │           ├── module_hash.rs       ← mirror of module-hash.js, unit tested natively
 │           ├── module_registry.rs   ← mirror of module-registry.js, unit tested natively (no sandbox equivalent — see module-sandbox.js's comment)
+│           ├── module_registry_reducer.rs ← mirror of module-registry-reducer.js, unit tested natively
 │           └── module_submission.rs ← mirror of module-submission.js, tested against real ed25519-dalek signing
 ├── tests/
 │   ├── cadence.test.mjs             ← unit tests, mirrors cadence.rs's suite case for case
@@ -99,6 +101,7 @@ AIWA/
 │   ├── solana-networks.test.mjs     ← network config (devnet default, mainnet marked as real cost)
 │   ├── module-hash.test.mjs         ← §27.4 content-addressing for module code
 │   ├── module-registry.test.mjs     ← §27.1/§27.2 open registration + economic validation
+│   ├── module-registry-reducer.test.mjs ← proves the registry propagates across partitioned domains via the real DAG
 │   ├── module-submission.test.mjs   ← signed submission pipeline, tested against real Ed25519 (@noble/curves, requires `npm install`)
 │   ├── conservation-scenario.test.mjs ← regression test pinning exact values for the shared conservation fixture
 │   ├── counterexample-nonatomic-consume.test.mjs ← deliberate non-atomic consume() counterexample (§7) — never exported as production code
@@ -401,6 +404,25 @@ sandbox (no network), so the first real test of the full loop happens
 in an actual browser, on devnet, with a wallet funded from a faucet.
 
 ## Modules (§27)
+
+**Real gap found and fixed after deployment, not before**: everything
+below was built as a standalone `ModuleRegistryState` object with no
+propagation mechanism — the user asked "le registre traverse les
+domaines, grâce au miroir?" and the honest answer was no. The JS/Rust
+mirror is portability, not replication; nothing moved a registration
+from one domain to another. Under connectivity this is invisible; under
+partition — this project's actual premise — Mars would never learn what
+Earth registered, or vice versa, ever. Fixed in
+`module-registry-reducer.js` / `module_registry_reducer.rs`: module
+registration/update/audit are now DAG event types
+(`module-register`/`module-update`/`module-audit`), and the registry is
+`registry(H_d)` — a materialized view exactly like `g.js`, propagated
+for free by `EventDag#merge()`, folded deterministically by
+`topoOrder()` (§9). 4 JS + 3 Rust tests directly prove the property that
+was missing: a module registered on Earth is genuinely absent from
+Mars's own materialized registry before reconciliation, and both
+converge to the identical registry after merging, regardless of merge
+order.
 
 Built after reviewing real prior code the user shared for inspiration (a
 working module/theme registry from another of their projects) and
@@ -922,3 +944,12 @@ previous update to this README.)
   (`zeroize@1.7.0`, `base64ct@1.6.0`, `ed25519-dalek@2.1.1`) for this
   sandbox's older `rustc` (1.75) to compile them. 114 JS / 83 Rust tests
   total.
+- Fixed a real architectural gap: the module registry propagated
+  nowhere across domains — the user asked directly whether the JS/Rust
+  mirror gave it cross-domain reach (it doesn't; that's portability, not
+  replication) and pointed out plainly that the list must be reachable
+  wherever the code is. Added `module-registry-reducer.js` /
+  `module_registry_reducer.rs`: module registration/update/audit are now
+  DAG event types, and the registry is a materialized view over H_d,
+  propagated by the same `merge()`/`topoOrder()` already proven for
+  economics and conservation. 7 new tests (118 JS / 86 Rust total).
