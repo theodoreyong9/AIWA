@@ -112,6 +112,15 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           set -e
+          # wasm-pack writes its OWN .gitignore (just "*") inside the
+          # output directory on every build — its default assumption is
+          # "this output gets npm-published, never committed." That is
+          # exactly the opposite of what this job does, and it silently
+          # made every previous run's `git add` stage nothing at all,
+          # regardless of the repo's own root .gitignore. Removing it
+          # before staging is what actually fixes that, found only by
+          # reading the real `ls -la` output rather than guessing.
+          rm -f public/js/wasm/.gitignore
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add public/js/wasm/
