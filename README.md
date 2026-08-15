@@ -987,3 +987,27 @@ previous update to this README.)
   `rankFromIdentityAndCadence()` (module-rank.js) added and tested (2
   new tests) — no Rust mirror yet, noted rather than silently skipped.
   129 JS / 90 Rust tests total.
+- Rebuilt the app UI a second time, correcting the structure per the
+  user's precise spec (after clarifying two ambiguities directly rather
+  than guessing): an empty **Desktop** is the default/home screen
+  (icons of locally-**pinned** plugins only — a new, deliberately
+  local-only concept, not replicated ledger state), with 5 bottom-nav
+  overlay screens — **Domain** (plugin/theme catalog for the active
+  domain, add-to-desktop, register new), **Profile** (identity status +
+  activated-plugin settings grouped by current network), **Commit**
+  (both identity-cost burn, moved here, AND real plugin code
+  submission), **Contacts** (known domains via DAG merge, now
+  searchable), **Parameters** (wallets — one real Ed25519 key serving
+  both the Solana-burn role and the AIWA-submission-signing role,
+  explicitly labeled as such rather than presented as two separate
+  systems — claim, network, θ, link/reconcile, log). The Commit screen's
+  "submit plugin code" is the real `module-submission.js` pipeline
+  exercised from the UI for the first time: real hash computed from
+  pasted code, real Ed25519 signature, real hash-mismatch rejection
+  verified directly (a tampered-after-signing payload is rejected with
+  the exact mismatched hashes stated, not a generic error) — the one
+  acknowledged gap is that code is pasted rather than fetched from a
+  real GitHub push, since no GitHub API integration exists yet. All
+  DOM ids re-verified programmatically against the new `index.html`.
+  129 JS / 90 Rust tests unaffected (no core logic changed, only how
+  it's surfaced).
