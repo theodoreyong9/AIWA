@@ -46,7 +46,7 @@ jobs:
         with:
           node-version: 22
       - name: Verify parity
-        run: ./scripts/verify-parity.sh
+        run: bash scripts/verify-parity.sh
 
   g-parity:
     name: JS / Rust composed-G parity
@@ -58,7 +58,7 @@ jobs:
         with:
           node-version: 22
       - name: Verify G parity
-        run: ./scripts/verify-g-parity.sh
+        run: bash scripts/verify-g-parity.sh
 
   conservation-parity:
     name: JS / Rust conservation parity
@@ -70,7 +70,7 @@ jobs:
         with:
           node-version: 22
       - name: Verify conservation parity
-        run: ./scripts/verify-conservation-parity.sh
+        run: bash scripts/verify-conservation-parity.sh
 
   wasm-build:
     name: Build WASM package
