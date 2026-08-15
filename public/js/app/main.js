@@ -29,6 +29,7 @@ import { registerDomainViaBurn } from '../core/identity/identity-flow.js';
 import { initialIdentityCostState, hasIdentityCost } from '../core/identity/identity-cost.js';
 import { SOLANA_NETWORKS, DEFAULT_NETWORK } from '../core/identity/solana-networks.js';
 import { materializeModuleRegistry } from '../core/modules/module-registry-reducer.js';
+import { materializeConservation } from '../core/conservation/conservation-bridge.js';
 import { rankFromIdentityAndCadence } from '../core/modules/module-rank.js';
 import { computeModuleHash } from '../core/modules/module-hash.js';
 import { buildSubmissionEvent, validateSubmission, initialSubmissionState, recordNonce } from '../core/modules/module-submission.js';
@@ -103,6 +104,22 @@ class DomainReplica {
 
   materialize() { return materializeG(theta, this.dag.topoOrder()); }
   materializeModules() { return materializeModuleRegistry(this.dag.topoOrder()); }
+  materializeConservation() { return materializeConservation(this.dag.topoOrder()); }
+
+  /**
+   * Sends `amount` of the domain's own accrued balance to `toDomainId`:
+   * a real claim-issue (debits the balance, creates a spendable claim)
+   * followed by a real transfer (Deactivate→Prove→Verify→Consume→
+   * Activate, §6.1/§7) folded as DAG events, propagated by merge() like
+   * everything else — not a special-cased "send" mechanism.
+   */
+  async sendAiwa(toDomainId, amount) {
+    const claimId = `claim-${this.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let id = await this.dag.addEvent([this.lastEventId], { type: 'claim-issue', domain: this.id, id: claimId, amount });
+    id = await this.dag.addEvent([id], { type: 'transfer', claimId, from: this.id, to: toDomainId });
+    this.lastEventId = id;
+    return claimId;
+  }
 }
 
 // ── Global state ────────────────────────────────────────────────────
@@ -248,6 +265,11 @@ function renderDesktop() {
   document.getElementById('d-epoch').textContent = gState.cadence.domains[myDomain.id]?.epoch ?? 0;
   document.getElementById('d-balance').textContent = gState.balances[myDomain.id] ?? 0;
 
+  const conState = myDomain.materializeConservation();
+  const ownedClaims = Object.values(conState.claims).filter((c) => c.owner === myDomain.id && c.status === 'active');
+  const claimsTotal = ownedClaims.reduce((sum, c) => sum + c.amount, 0);
+  document.getElementById('d-claims').textContent = `${claimsTotal} (${ownedClaims.length} claim${ownedClaims.length === 1 ? '' : 's'})`;
+
   const registry = myDomain.materializeModules();
   const pinned = new Set(pinnedIds(myDomain.id));
   const pinnedModules = Object.values(registry.modules)
@@ -341,8 +363,34 @@ function renderContactsScreen() {
   for (const d of others) {
     const row = document.createElement('div');
     row.className = 'contact-row';
-    row.innerHTML = `<div class="contact-hash">${d}</div><div class="contact-delay">epoch ${state.cadence.domains[d].epoch} · delay: <input type="number" min="0" step="1" value="${contactDelay(d)}" style="width:4rem;display:inline-block" data-domain="${d}"> min</div>`;
-    row.querySelector('input').addEventListener('change', (e) => setContactDelay(d, parseFloat(e.target.value) || 0));
+    row.innerHTML = `<div class="contact-hash">${d}</div><div class="contact-delay">epoch ${state.cadence.domains[d].epoch} · delay: <input type="number" min="0" step="1" value="${contactDelay(d)}" style="width:4rem;display:inline-block" data-domain="${d}"> min</div>
+      <div class="row" style="margin-top:0.3rem">
+        <input type="number" min="1" step="1" placeholder="amount" class="send-amount-input" style="flex:1">
+        <button class="send-aiwa-btn" style="flex:0 0 auto">Send AIWA</button>
+      </div>
+      <p class="msg send-msg"></p>`;
+    row.querySelector('input[data-domain]').addEventListener('change', (e) => setContactDelay(d, parseFloat(e.target.value) || 0));
+    row.querySelector('.send-aiwa-btn').addEventListener('click', async () => {
+      const amountInput = row.querySelector('.send-amount-input');
+      const msgEl = row.querySelector('.send-msg');
+      const amount = parseFloat(amountInput.value);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        msgEl.textContent = 'Enter a positive amount.';
+        msgEl.className = 'msg error';
+        return;
+      }
+      const currentBalance = myDomain.materialize().balances[myDomain.id] ?? 0;
+      if (amount > currentBalance) {
+        msgEl.textContent = `Insufficient balance (have ${currentBalance}).`;
+        msgEl.className = 'msg error';
+        return;
+      }
+      const claimId = await myDomain.sendAiwa(d, amount);
+      msgEl.textContent = `✅ Sent — claim ${claimId.slice(0, 16)}…`;
+      msgEl.className = 'msg success';
+      log(`[${myDomain.id}] sent ${amount} AIWA to ${d} (claim ${claimId})`);
+      renderAll();
+    });
     listEl.appendChild(row);
   }
 }
