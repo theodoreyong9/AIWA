@@ -1,0 +1,16 @@
+{
+  "name": "aiwa-core",
+  "type": "module",
+  "description": "AIWA reference ledger core (DAG of events, materialized economic view). Compiled to WASM.",
+  "version": "0.1.0",
+  "files": [
+    "aiwa_core_bg.wasm",
+    "aiwa_core.js",
+    "aiwa_core.d.ts"
+  ],
+  "main": "aiwa_core.js",
+  "types": "aiwa_core.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
