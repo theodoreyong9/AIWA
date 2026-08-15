@@ -12,9 +12,11 @@
     #subtitle { margin: 0 1rem 0.4rem; color: #666; font-size: 0.82rem; }
     #status { margin: 0 1rem 0.5rem; color: #555; font-size: 0.8rem; }
 
-    #domain-switcher { display: flex; gap: 0.4rem; margin: 0.5rem 1rem; }
-    .domain-switch-btn { flex: 1; padding: 0.45rem; border-radius: 8px; border: 1px solid #ccc; background: #f7f7f8; font: inherit; font-size: 0.88rem; }
+    #domain-switcher { display: flex; gap: 0.4rem; margin: 0.5rem 1rem; align-items: center; }
+    #domain-pills { display: flex; gap: 0.35rem; flex: 1; overflow-x: auto; }
+    .domain-switch-btn { flex: 0 0 auto; padding: 0.45rem 0.7rem; border-radius: 8px; border: 1px solid #ccc; background: #f7f7f8; font: inherit; font-size: 0.85rem; white-space: nowrap; }
     .domain-switch-btn.active { border-color: #333; background: #fff; font-weight: 700; }
+    #add-domain-btn { flex: 0 0 auto; font-size: 0.78rem; padding: 0.4rem 0.6rem; }
 
     .screen { display: none; padding: 0 1rem; }
     .screen.active { display: block; }
@@ -84,8 +86,8 @@
     <p id="status">Initializing…</p>
 
     <div id="domain-switcher">
-      <button data-domain="earth" class="domain-switch-btn active">🌍 Earth</button>
-      <button data-domain="mars" class="domain-switch-btn">🔴 Mars</button>
+      <div id="domain-pills"></div>
+      <button id="add-domain-btn" title="Create a new domain">+ New domain</button>
     </div>
 
     <!-- ══ DESKTOP (default/home screen — no nav button, always underneath) ══ -->
@@ -94,6 +96,7 @@
         <h2 id="desktop-title">Desktop — Earth</h2>
         <div class="stat-row"><span>Cadence epoch</span><span id="d-epoch">0</span></div>
         <div class="stat-row"><span>Balance</span><span id="d-balance">0</span></div>
+        <button id="advance-btn" class="full-btn">+ Cadence epoch</button>
         <div id="desktop-empty">Empty. Open <strong>Domain</strong> below to add plugins.</div>
         <div id="desktop-icons"></div>
       </div>
@@ -103,20 +106,9 @@
     <section id="screen-domain" class="screen">
       <div class="card">
         <h2>Plugins available on this domain</h2>
-        <p class="hint">Registered on this domain's ledger (§27.4.2) — add to your desktop, or register a new one below.</p>
+        <p class="hint">Registered on this domain's ledger (§27.4.2) — add to your desktop. To register a new one, use <strong>Commit → Submit plugin code</strong> (the one real, verified path — signed, hash-checked).</p>
         <div id="catalog-empty">No plugins registered on this domain yet.</div>
         <div id="catalog-list"></div>
-      </div>
-      <div class="card">
-        <h2>Register a new plugin</h2>
-        <div class="row">
-          <input id="mod-id" placeholder="id, e.g. weather.js" />
-          <input id="mod-icon" placeholder="icon" maxlength="4" style="flex:0 0 3.5rem" />
-        </div>
-        <input id="mod-name" placeholder="Display name" style="margin-bottom:0.4rem" />
-        <button id="mod-register-btn" class="full-btn">Register</button>
-        <p class="hint">Requires a registered identity (see Parameters). Rank = reward(burned lamports, cadence epochs) — the real §10 formula.</p>
-        <p class="msg" id="mod-msg"></p>
       </div>
     </section>
 
@@ -139,10 +131,20 @@
     <section id="screen-commit" class="screen">
       <div class="card">
         <h2 id="commit-burn-title">🔥 Burn — Earth</h2>
+        <p class="hint">Requires network access to Solana — impossible for a domain that has never had connectivity to Earth's networks (§24.6(v)'s real limitation).</p>
         <input type="number" id="burn-amount" placeholder="Lamports to burn (any amount)" min="1" step="1" />
         <button id="burn-btn" class="full-btn" disabled>Burn to register identity</button>
         <p class="hint">No minimum — any positive burn is a real, irrecoverable cost and counts as c_id (§24.6(v)).</p>
         <p class="msg" id="burn-msg"></p>
+      </div>
+      <div class="card">
+        <h2 id="pow-title">⛏️ Mine locally — Earth</h2>
+        <p class="hint">No network needed at all (§24.6(ii)) — the only option for a domain that has never been able to reach Solana. Real CPU work, verified by recomputing the hash, not trusted on claim.</p>
+        <div class="row">
+          <div><label class="field-label">Difficulty (bits)</label><input type="number" id="pow-difficulty" value="16" min="4" max="24" /></div>
+        </div>
+        <button id="pow-btn" class="full-btn">Mine to register identity</button>
+        <p class="msg" id="pow-msg"></p>
       </div>
       <div class="card">
         <h2>📤 Submit plugin code</h2>
@@ -188,7 +190,7 @@
         <h2>Claim reward</h2>
         <div class="stat-row"><span>Pending commits</span><span id="c-pending">0</span></div>
         <div class="row">
-          <button id="commit-action-btn" disabled>Commit (b=10)</button>
+          <button id="commit-action-btn" disabled>Stake claim (b=10)</button>
           <button id="claim-btn" disabled>Claim</button>
         </div>
         <p class="hint" id="claim-gated-hint">Requires identity registration (§24/§26).</p>
@@ -213,12 +215,10 @@
       </div>
 
       <div class="card">
-        <h2>Link (interplanetary partition)</h2>
-        <p class="stat-row"><span>Status</span><span id="link-status" class="down">🔴 Down (partitioned)</span></p>
-        <div class="row">
-          <button id="toggle-link-btn">Restore link</button>
-          <button id="reconcile-btn" disabled>🔄 Reconcile</button>
-        </div>
+        <h2>Reconcile (interplanetary partition)</h2>
+        <p class="hint">No global "link" — connectivity is per pair and decided by whoever is actually in contact right now. Pick who this domain can currently reach.</p>
+        <select id="reconcile-target"></select>
+        <button id="reconcile-btn" class="full-btn" disabled>🔄 Reconcile with selected domain</button>
       </div>
 
       <div class="card">
