@@ -22,7 +22,6 @@ import { registerDomainViaBurn } from '../core/identity/identity-flow.js';
 import { initialIdentityCostState, hasIdentityCost } from '../core/identity/identity-cost.js';
 import { SOLANA_NETWORKS, DEFAULT_NETWORK } from '../core/identity/solana-networks.js';
 
-const MIN_BURN_LAMPORTS = 100_000; // 0.0001 SOL — matches the "Register identity" button's label
 const WALLET_STORAGE_PREFIX = 'aiwa-wallet-';
 
 const statusEl = document.getElementById('status');
@@ -236,19 +235,27 @@ async function unlockWallet(replica, password) {
 }
 
 /**
- * Registers `replica`'s domain by burning MIN_BURN_LAMPORTS on the
- * currently-selected network. This sends a real transaction once
- * deployed and run in an actual browser — see identity-flow.js and
- * README.md's "Identity cost" section for exactly what is and isn't
- * verified in this development sandbox.
+ * Registers `replica`'s domain by burning a user-chosen amount of
+ * lamports on the currently-selected network — no minimum imposed here
+ * (see identity-cost.js: any positive burn is a real cost and counts
+ * as c_id; a fixed floor was removed on purpose, not an oversight).
+ * This sends a real transaction once deployed and run in an actual
+ * browser — see identity-flow.js and README.md's "Identity cost"
+ * section for exactly what is and isn't verified in this development
+ * sandbox.
  */
 async function registerIdentity(replica) {
   const network = currentNetwork();
   const config = SOLANA_NETWORKS[network];
-  const solAmount = MIN_BURN_LAMPORTS / 1_000_000_000;
+  const amountInput = document.getElementById(`${replica.name}-burn-amount`);
+  const lamports = parseInt(amountInput.value, 10);
+  if (!Number.isInteger(lamports) || lamports <= 0) {
+    return setIdentityMsg(replica.name, 'Enter a positive lamport amount — any amount is accepted, there is no minimum.', 'error');
+  }
+  const solAmount = lamports / 1_000_000_000;
 
   const confirmed = confirm(
-    `Burn ${solAmount} SOL on ${config.label}?\n\n` +
+    `Burn ${lamports} lamports (${solAmount} SOL) on ${config.label}?\n\n` +
       `This is sent to the network's incinerator address and is irreversible.\n` +
       (config.isRealCost ? 'This is REAL money on mainnet.' : 'This is free devnet SOL — no real cost, testing only.')
   );
@@ -259,7 +266,7 @@ async function registerIdentity(replica) {
   try {
     const result = await registerDomainViaBurn(web3, replica.keypair, identityState, {
       domain: replica.name,
-      lamports: MIN_BURN_LAMPORTS,
+      lamports,
       network,
     });
     identityState = result.state;
