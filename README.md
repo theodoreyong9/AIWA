@@ -1011,3 +1011,38 @@ previous update to this README.)
   DOM ids re-verified programmatically against the new `index.html`.
   129 JS / 90 Rust tests unaffected (no core logic changed, only how
   it's surfaced).
+- Fixed two real gaps the user caught directly, both substantive, not
+  cosmetic. (1) "impossible qu'on brûle du solana sur Mars" — correct:
+  the SOL-burn identity mechanism requires reaching Solana's network,
+  which a domain that has never had connectivity to Earth's networks
+  cannot do, ever. Added `local-pow.js`/`local_pow.rs` (§24.6(ii)): a
+  genuinely network-independent identity-cost mechanism — real CPU-bound
+  mining (SHA-256 nonce search against a difficulty target), verified by
+  recomputing the hash, not trusting the claim. 8 JS + 8 Rust tests,
+  including a forged-proof rejection. Wired into the Commit screen
+  alongside SOL burn as an explicit alternative, with the network
+  dependency stated as SOL burn's own limitation rather than glossed
+  over. (2) The Earth/Mars two-domain model was corrected: domains are
+  now created on demand (`domains: Map`), no fixed count, no hierarchy —
+  matching the real model where there are as many domains as
+  users/entities. The single global "link" boolean was removed entirely
+  and replaced with pairwise reconciliation: Reconcile always targets
+  one specific, user-chosen other domain, matching real reachability
+  rather than a fictional whole-system connectivity switch. Verified
+  directly (not just by inspection): a domain created via local PoW with
+  zero network calls registers correctly; two domains reconciled
+  pairwise converge to identical balances while a third, never-merged
+  domain stays fully isolated, seeing only itself.
+- Also fixed two UI confusions flagged directly: removed the duplicate
+  quick "Register a module" shortcut from the Domain screen (it bypassed
+  the real signed/hash-checked pipeline) — Commit → Submit plugin code
+  is now the one real path. Renamed the G-economics "Commit (b=10)"
+  action to "Stake claim (b=10)" to remove the naming collision with the
+  Commit nav button, which means something unrelated (burn + submit).
+  137 JS / 104 Rust tests total.
+- **Open**: a "code must be fetched anonymously/publicly, not from a
+  gated URL" check for module-fetch.js (discussed, not yet built —
+  next step). The exact original YourMine mining formula's possible
+  `ln` term (asked about directly) could not be verified against the
+  original source, which is no longer reliably in context after this
+  session's length — flagged rather than guessed at.
