@@ -198,6 +198,8 @@ mod tests {
         }
     }
 
+    // r = b * max(1,q) with these params — see reward.rs's test module
+    // header for why (beta=0 nullifies q_total, c=e-1 makes ln(1+c)=1).
     fn theta<'a>(budgets: &'a [(&'a str, Option<f64>)]) -> Theta<'a> {
         Theta {
             reward: RewardParams { alpha: 1.0, beta: 0.0, gamma: 1.0, c: std::f64::consts::E - 1.0, min_q: 1.0 },
@@ -221,6 +223,7 @@ mod tests {
         let mut state = GState::new(&t);
         state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
         state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
+        // b=10 at q0=0, current epoch=2 -> q=2 -> r = 10 * max(1,2) = 20
         state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0));
         assert_eq!(state.balances.get("d1"), Some(&20.0));
     }
@@ -269,7 +272,7 @@ mod tests {
         let e = Event {
             id: "a1".to_string(),
             parents: vec!["c2".to_string()],
-            payload: serde_json::json!({ "type": "accrual", "domain": "d1", "b": 10.0, "q0": 0 }),
+            payload: serde_json::json!({ "type": "accrual", "domain": "d1", "b": 10.0, "q0": 0 }), // no T field
         };
         state.apply_event(&t, &e);
         assert_eq!(state.balances.get("d1"), Some(&20.0));
@@ -282,7 +285,7 @@ mod tests {
         let mut state = GState::new(&t);
         state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
         state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
-        state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0));
+        state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0)); // balance = 20
         let e = Event {
             id: "ci1".to_string(),
             parents: vec!["a1".to_string()],
@@ -299,7 +302,7 @@ mod tests {
         let mut state = GState::new(&t);
         state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
         state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
-        state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0));
+        state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0)); // balance = 20
         let e = Event {
             id: "ci1".to_string(),
             parents: vec!["a1".to_string()],
@@ -315,7 +318,7 @@ mod tests {
         let budgets = [("d1", None)];
         let t = theta(&budgets);
         let events = vec![
-            accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0),
+            accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0), // fed first, out of order
             cadence_event("c1", vec![], "d1", 1),
             cadence_event("c2", vec!["c1".to_string()], "d1", 2),
         ];
