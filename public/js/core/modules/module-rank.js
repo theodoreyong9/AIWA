@@ -80,3 +80,31 @@ export function checkSubmissionEligibility(newRank, newEpochsElapsed, lastSubmis
   }
   return { eligible: true };
 }
+
+/**
+ * Convenience wrapper tying computeModuleRank() to the two pieces of
+ * state a domain already has: its identity-cost burn (identity-cost.js)
+ * and its current cadence epoch (cadence.js). Returns 0 for a domain
+ * with no registered identity cost — it cannot rank at all until it
+ * has paid c_id, matching §24.6(v)'s "identity admitted only after a
+ * verified burn" requirement.
+ *
+ * Documented simplification, not a silent approximation: this uses the
+ * domain's CURRENT cadence epoch as the elapsed-time input, treating the
+ * burn as having occurred at epoch 0. Tracking the domain's actual
+ * cadence epoch at the moment of the burn (a more precise q) would
+ * require extending IdentityCostState's data model — out of scope for
+ * this pass, recorded rather than silently assumed equivalent.
+ *
+ * @param {import('../identity/identity-cost.js').IdentityCostState} identityCostState
+ * @param {import('./cadence-shape').CadenceState} cadenceState — the `cadence` sub-state of a materializeG() result
+ * @param {string} domain
+ * @param {{ K: number, alpha: number, beta: number }} rewardParams
+ * @returns {number}
+ */
+export function rankFromIdentityAndCadence(identityCostState, cadenceState, domain, rewardParams) {
+  const identity = identityCostState.registered[domain];
+  if (!identity) return 0;
+  const currentEpoch = cadenceState.domains[domain]?.epoch ?? 0;
+  return computeModuleRank(identity.burnedLamports, currentEpoch, rewardParams);
+}
