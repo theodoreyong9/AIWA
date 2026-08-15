@@ -20,9 +20,11 @@ pub use identity::{
     RegisteredIdentity, VerifyResult, SOLANA_INCINERATOR_ADDRESS,
 };
 pub use modules::{
-    apply_module_event, build_submission_event, compute_module_hash, materialize_module_registry,
-    record_nonce, select_identity_scheme, submit_module, validate_economic_config,
-    validate_submission, verify_module_integrity, verify_submission_signature, AuditStatus,
-    EconomicConfig, IdentityScheme, ModuleEntry, ModuleRegistryState, NewModule, RegisterOutcome,
-    SubmissionEvent, SubmissionState, SubmitOutcome, ValidationOutcome, ValidationResult,
+    apply_module_event, build_submission_event, check_submission_eligibility,
+    compute_module_hash, compute_module_rank, materialize_module_registry, record_nonce,
+    select_identity_scheme, submit_module, validate_economic_config, validate_submission,
+    verify_module_integrity, verify_submission_signature, AuditStatus, EconomicConfig,
+    EligibilityResult, IdentityScheme, LastSubmission, ModuleEntry, ModuleRegistryState,
+    NewModule, RegisterOutcome, SubmissionEvent, SubmissionState, SubmitOutcome,
+    ValidationOutcome, ValidationResult,
 };
