@@ -66,6 +66,13 @@
     .nav-btn .nav-icon { font-size: 1.1rem; }
     .nav-btn.active { color: #1a1a1a; font-weight: 700; }
   </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "@noble/curves/ed25519": "https://esm.sh/@noble/curves@1.7.0/ed25519"
+    }
+  }
+  </script>
 </head>
 <body>
   <main id="app">
@@ -83,6 +90,7 @@
         <h2 id="desktop-title">Desktop</h2>
         <div class="stat-row"><span>Cadence epoch</span><span id="d-epoch">0</span></div>
         <div class="stat-row"><span>Balance</span><span id="d-balance">0</span></div>
+        <div class="stat-row"><span>Claims owned (sent to me, unspent)</span><span id="d-claims">0</span></div>
         <button id="advance-btn" class="full-btn">+ Cadence epoch</button>
       </div>
 
