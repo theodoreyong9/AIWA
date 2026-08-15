@@ -47,7 +47,10 @@ pub struct VerifyResult {
 }
 
 /// Pure check against a normalized transaction record — mirror of
-/// verifyBurnProof() in identity-cost.js.
+/// verifyBurnProof() in identity-cost.js. No fixed minimum by design:
+/// min_lamports defaults to 0 via verify_burn_proof_default(); a burn
+/// of any positive size is a real cost and counts as c_id. The only
+/// hard requirement is that something was actually burned (delta > 0).
 pub fn verify_burn_proof(tx: &NormalizedBurnTx, min_lamports: i64) -> VerifyResult {
     if tx.err.is_some() {
         return VerifyResult { valid: false, reason: Some("transaction failed on-chain (err is non-null)".to_string()) };
@@ -58,11 +61,14 @@ pub fn verify_burn_proof(tx: &NormalizedBurnTx, min_lamports: i64) -> VerifyResu
             reason: Some(format!("commitment is {:?}, not Finalized — not yet irreversible", tx.commitment)),
         };
     }
+    if tx.incinerator_balance_delta_lamports <= 0 {
+        return VerifyResult { valid: false, reason: Some("no positive burn detected (incinerator balance did not increase)".to_string()) };
+    }
     if tx.incinerator_balance_delta_lamports < min_lamports {
         return VerifyResult {
             valid: false,
             reason: Some(format!(
-                "incinerator balance increased by {} lamports, need >= {min_lamports}",
+                "incinerator balance increased by {} lamports, need >= {min_lamports} (deployment-configured floor)",
                 tx.incinerator_balance_delta_lamports
             )),
         };
@@ -140,6 +146,18 @@ mod tests {
     fn valid_finalized_burn_of_at_least_min_lamports_is_accepted() {
         let tx = valid_tx("sig-1", ONE_SOL_LAMPORTS, Commitment::Finalized, None);
         assert!(verify_burn_proof(&tx, ONE_SOL_LAMPORTS).valid);
+    }
+
+    #[test]
+    fn tiny_burn_is_accepted_with_zero_floor_no_minimum_by_default() {
+        let tx = valid_tx("sig-1", 1, Commitment::Finalized, None);
+        assert!(verify_burn_proof(&tx, 0).valid);
+    }
+
+    #[test]
+    fn zero_lamport_burn_is_rejected_even_with_zero_floor() {
+        let tx = valid_tx("sig-1", 0, Commitment::Finalized, None);
+        assert!(!verify_burn_proof(&tx, 0).valid);
     }
 
     #[test]
