@@ -1,58 +1,82 @@
-// reward.js — the accrual reward function, per §10:
+// reward.js — the accrual reward function, per §10, now adopting the
+// real Proof-of-Will formula the user's own prior work uses (YourMine's
+// mine.js, calcClaimable()), not this project's earlier, simpler
+// power-law r = K·b^α·q^β. Standard form:
 //
-//   r(b, q) = K · b^α · q^β
+//   r(b, q, qTotal, T) = (b · q^α) / [ln(qTotal^(β(1−T)) + C)]^γ
 //
-// where b is committed resource for the event, K/α/β are
-// deployment-chosen constants, and q is elapsed economic age in cadence
-// epochs (Definition 10.1), NOT wall-clock time — q comes from the
-// cadence reducer (cadence.js), never from Date.now() or any local
-// clock. This file only computes the reward number itself; it has no
-// opinion about scarcity (§13, not enforced here) or about whether an
-// event is even valid (that's the DAG's and the cadence reducer's job).
+// Two adaptations from the original are deliberate, not incidental,
+// both because AIWA domains never share a global clock (§9) while the
+// original — a single Solana program every participant reads slots
+// from — assumes one:
+//
+//   - qTotal ("protocol age" in the original: slots since a single
+//     fixed global reference block, identical for every participant)
+//     is this DOMAIN'S OWN total cadence epoch count here, not a
+//     quantity shared across domains. Requiring every AIWA domain to
+//     agree on one global reference epoch would reintroduce exactly
+//     the cross-domain synchronization dependency §9 rules out. Using
+//     each domain's own age preserves the formula's intent — reward
+//     per action shrinks as a domain matures — without any domain
+//     needing to know anything about any other domain's clock.
+//   - The original enforces a minimum wait of 30 Solana slots
+//     (~12 seconds) before any reward is claimable. AIWA's epoch is a
+//     coarser, deployment-defined unit (§10), not a fixed ~400ms slot,
+//     so the literal number 30 would carry no equivalent meaning here.
+//     Replaced with `minQ`, a deployment-chosen minimum epoch count,
+//     defaulting to 1 (some non-zero cadence time must actually pass).
+//
+// b, q, and qTotal must be finite and >= 0 by construction (§10); q = 0
+// still yields 0 whenever alpha > 0 for b > 0, the same "no instant
+// reward" property the original power-law form had — cadence-derived
+// economic time still governs, only the shape of the curve changed.
+
+export class RewardError extends Error {}
 
 /**
- * @typedef {{ K: number, alpha: number, beta: number }} RewardParams
+ * @typedef {{ alpha: number, beta: number, gamma: number, C: number, minQ: number }} RewardParams
  */
 
 /**
- * Pure reward function r(b, q) = K · b^α · q^β.
+ * Pure reward function, standard form above.
  *
- * b and q must be finite and >= 0 — b is a committed resource amount, q
- * is an elapsed epoch count (Definition 10.1); neither can be negative
- * by construction. q = 0 (reward claimed at the same epoch it was
- * accepted) yields 0 whenever β > 0, which is intentional: the whole
- * point of cadence-derived economic time is that reward accrues *with*
- * elapsed protocol time, not instantaneously.
- *
- * @param {number} b
- * @param {number} q
+ * @param {number} b - committed capital backing this claim (the original's S)
+ * @param {number} q - epochs elapsed since this claim's q0 (Definition 10.1; the original's t)
+ * @param {number} qTotal - this domain's own total cadence epoch count (the original's A, made domain-local — see file header)
+ * @param {number} patienceRate - T, caller-chosen, clamped to [0, 0.4] exactly as the original does (Math.min(taxRate,40)/100)
  * @param {RewardParams} params
  * @returns {number}
  */
-export function reward(b, q, { K, alpha, beta }) {
-  if (!Number.isFinite(b) || b < 0) {
-    throw new RangeError(`b must be a finite number >= 0, got ${b}`);
-  }
-  if (!Number.isFinite(q) || q < 0) {
-    throw new RangeError(`q must be a finite number >= 0, got ${q}`);
-  }
-  if (!Number.isFinite(K) || !Number.isFinite(alpha) || !Number.isFinite(beta)) {
-    throw new RangeError('K, alpha, and beta must all be finite numbers');
+export function reward(b, q, qTotal, patienceRate, { alpha, beta, gamma, C, minQ }) {
+  if (!Number.isFinite(b) || b < 0) throw new RewardError(`b must be a finite number >= 0, got ${b}`);
+  if (!Number.isFinite(q) || q < 0) throw new RewardError(`q must be a finite number >= 0, got ${q}`);
+  if (!Number.isFinite(qTotal) || qTotal < 0) throw new RewardError(`qTotal must be a finite number >= 0, got ${qTotal}`);
+  if (![alpha, beta, gamma, C, minQ].every(Number.isFinite)) {
+    throw new RewardError('alpha, beta, gamma, C, and minQ must all be finite numbers');
   }
 
-  // 0^0 = 1 by convention here (no committed resource / no elapsed time
-  // still yields the base multiplier K rather than an undefined result),
-  // matching Math.pow / f64::powf's own 0^0 = 1 convention in both
-  // languages, so JS and Rust agree without a special case.
-  return K * b ** alpha * q ** beta;
+  if (q < minQ) return 0;
+
+  const T = Math.min(Math.max(patienceRate, 0), 0.4);
+  const effQ = Math.max(1, q);
+  const effQTotal = Math.max(1, qTotal);
+
+  const numerator = effQ ** alpha * b;
+  const inner = effQTotal ** (beta * (1 - T)) + C;
+  if (inner <= 1) return 0;
+
+  const denominator = Math.log(inner) ** gamma;
+  if (!(denominator > 0) || !Number.isFinite(denominator) || !Number.isFinite(numerator)) return 0;
+
+  const r = numerator / denominator;
+  if (r < 0 || !Number.isFinite(r) || r > 1e12) return 0;
+  return r;
 }
 
 /**
  * Derives q (elapsed economic epochs, Definition 10.1) for an accrual
  * event from the domain's current cadence state and the event's
- * acceptance epoch q_0. Returns 0 (never negative) if q_0 is in the
- * future relative to the domain's current epoch or the domain has no
- * recorded cadence yet — an event cannot have negative economic age.
+ * acceptance epoch q_0. Unchanged from the prior revision.
  *
  * @param {import('./cadence.js').CadenceState} cadenceState
  * @param {string} domain
@@ -62,4 +86,17 @@ export function reward(b, q, { K, alpha, beta }) {
 export function elapsedEpochs(cadenceState, domain, q0) {
   const currentEpoch = cadenceState.domains[domain]?.epoch ?? 0;
   return Math.max(0, currentEpoch - q0);
+}
+
+/**
+ * qTotal — this domain's own total cadence epoch count right now, as
+ * folded so far. See file header: this stands in for the original's
+ * global "protocol age," deliberately made domain-local.
+ *
+ * @param {import('./cadence.js').CadenceState} cadenceState
+ * @param {string} domain
+ * @returns {number}
+ */
+export function domainAge(cadenceState, domain) {
+  return cadenceState.domains[domain]?.epoch ?? 0;
 }
