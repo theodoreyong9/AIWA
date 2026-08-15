@@ -5,7 +5,7 @@
 //   1. RANK — where a module sorts in the list. Computed from its
 //      author's identity-cost burn (§24) and how many cadence epochs
 //      have elapsed since that burn — reusing reward.js's real,
-//      already-tested r(b,q) = K·b^α·q^β directly, not a new formula.
+//      already-tested Proof-of-Will formula directly, not a second one.
 //      A larger burn, aged longer, ranks higher — the same "will over
 //      time" logic §10 already establishes for accrual, applied here to
 //      sorting instead of issuance.
@@ -32,16 +32,19 @@ import { reward } from '../economics/reward.js';
 /**
  * The module list's sort key. Reuses the real reward function directly
  * — this is not a second formula to keep in sync with §10's, it IS
- * §10's formula, applied to (the author's burned lamports, epochs
- * elapsed since that burn).
+ * §10's formula (the real Proof-of-Will structure, reward.js), applied
+ * to (the author's burned lamports, epochs elapsed since that burn).
+ * qTotal and q are the same value here — see rankFromIdentityAndCadence's
+ * documented simplification below — and patienceRate defaults to 0 (no
+ * per-module patience concept yet; out of scope for this pass).
  *
  * @param {number} burnedLamports
  * @param {number} epochsElapsed
- * @param {{ K: number, alpha: number, beta: number }} rewardParams
+ * @param {import('../economics/reward.js').RewardParams} rewardParams
  * @returns {number}
  */
 export function computeModuleRank(burnedLamports, epochsElapsed, rewardParams) {
-  return reward(burnedLamports, epochsElapsed, rewardParams);
+  return reward(burnedLamports, epochsElapsed, epochsElapsed, 0, rewardParams);
 }
 
 /**
@@ -90,7 +93,7 @@ export function checkSubmissionEligibility(newRank, newEpochsElapsed, lastSubmis
  * verified burn" requirement.
  *
  * Documented simplification, not a silent approximation: this uses the
- * domain's CURRENT cadence epoch as the elapsed-time input, treating the
+ * domain's CURRENT cadence epoch as both q and qTotal, treating the
  * burn as having occurred at epoch 0. Tracking the domain's actual
  * cadence epoch at the moment of the burn (a more precise q) would
  * require extending IdentityCostState's data model — out of scope for
@@ -99,7 +102,7 @@ export function checkSubmissionEligibility(newRank, newEpochsElapsed, lastSubmis
  * @param {import('../identity/identity-cost.js').IdentityCostState} identityCostState
  * @param {import('./cadence-shape').CadenceState} cadenceState — the `cadence` sub-state of a materializeG() result
  * @param {string} domain
- * @param {{ K: number, alpha: number, beta: number }} rewardParams
+ * @param {import('../economics/reward.js').RewardParams} rewardParams
  * @returns {number}
  */
 export function rankFromIdentityAndCadence(identityCostState, cadenceState, domain, rewardParams) {
