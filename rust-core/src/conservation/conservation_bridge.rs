@@ -36,7 +36,7 @@ pub fn apply_conservation_event(state: &mut ConservationState, event: &Event) {
             return;
         }
         let kind_str = p.kind.unwrap_or_else(|| "AIWA".to_string());
-        let _ = state.issue_claim(&id, &kind_str, amount, &domain);
+        let _ = state.issue_claim(&id, &kind_str, amount, &domain); // duplicate id -> Err, tolerated, same fold discipline as elsewhere
         return;
     }
 
