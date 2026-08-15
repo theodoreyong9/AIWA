@@ -48,6 +48,7 @@ AIWA/
 │       │       ├── module-hash.js       ← §27.4 content-addressing for module code — pure, tested
 │       │       ├── module-registry.js   ← §27.1/§27.2 open registration + economic validation — pure, tested
 │       │       ├── module-registry-reducer.js ← registry as a materialized view over H_d — propagates via merge(), fixes a real gap the user found
+│       │       ├── module-rank.js       ← list sort key (reuses reward.js) + submission eligibility — two separate calculations, per the user
 │       │       ├── module-submission.js ← signed submission pipeline: replay guard + signature + hash re-check — pure, tested against real Ed25519
 │       │       ├── module-fetch.js      ← real fetch(codeUrl) + submission — untestable in this sandbox
 │       │       └── module-sandbox.js    ← §27.4 real iframe isolation — untestable in this sandbox
@@ -82,6 +83,7 @@ AIWA/
 │           ├── module_hash.rs       ← mirror of module-hash.js, unit tested natively
 │           ├── module_registry.rs   ← mirror of module-registry.js, unit tested natively (no sandbox equivalent — see module-sandbox.js's comment)
 │           ├── module_registry_reducer.rs ← mirror of module-registry-reducer.js, unit tested natively
+│           ├── module_rank.rs       ← mirror of module-rank.js, unit tested natively
 │           └── module_submission.rs ← mirror of module-submission.js, tested against real ed25519-dalek signing
 ├── tests/
 │   ├── cadence.test.mjs             ← unit tests, mirrors cadence.rs's suite case for case
@@ -102,6 +104,7 @@ AIWA/
 │   ├── module-hash.test.mjs         ← §27.4 content-addressing for module code
 │   ├── module-registry.test.mjs     ← §27.1/§27.2 open registration + economic validation
 │   ├── module-registry-reducer.test.mjs ← proves the registry propagates across partitioned domains via the real DAG
+│   ├── module-rank.test.mjs         ← list sort key + submission eligibility, two separate calculations
 │   ├── module-submission.test.mjs   ← signed submission pipeline, tested against real Ed25519 (@noble/curves, requires `npm install`)
 │   ├── conservation-scenario.test.mjs ← regression test pinning exact values for the shared conservation fixture
 │   ├── counterexample-nonatomic-consume.test.mjs ← deliberate non-atomic consume() counterexample (§7) — never exported as production code
@@ -953,3 +956,15 @@ previous update to this README.)
   DAG event types, and the registry is a materialized view over H_d,
   propagated by the same `merge()`/`topoOrder()` already proven for
   economics and conservation. 7 new tests (118 JS / 86 Rust total).
+- Fixed three things the user identified directly, in one pass:
+  (1) removed the hardcoded minimum burn amount from `identity-cost.js`/
+  `mod.rs` — `verifyBurnProof`'s `minLamports` now defaults to 0; any
+  positive burn is a real cost and counts as c_id, matching "il ne doit
+  pas y avoir de minimum." The UI's fixed "burn 0.0001 SOL" button
+  became a free-amount input. (2) Built `module-rank.js`/`module_rank.rs`:
+  list sort rank (reuses `reward.js`'s real r(b,q) directly — the
+  author's burned lamports and elapsed cadence epochs) kept fully
+  separate from submission eligibility (a ratio-must-not-decline check
+  modeled on the real reference implementation's `checkScoreEligibility`),
+  exactly the two distinct calculations the user described. 17 new/updated
+  tests. 127 JS / 96 Rust total.
