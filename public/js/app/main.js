@@ -1,29 +1,32 @@
 // main.js — AIWA app entry point. Pure JavaScript, no framework, no
 // build step.
 //
-// N domains, not a fixed two. Earlier revisions hardcoded "Earth" and
-// "Mars" as the only two domains — the user pointed out directly that
-// this doesn't match the real model: there are as many domains as
-// there are users/entities, and who can reconcile with whom at any
-// moment depends on actual reachability, not a fixed global "link"
-// toggle. Fixed here: domains is a Map, created on demand; there is no
-// global link state — Reconcile always targets one specific,
-// user-chosen other domain, matching "I am currently in contact with
-// THIS one," not "the whole system is connected or not."
+// Domain identity is derived from the wallet, not chosen. Earlier
+// revisions let the user type/select a domain name ("Earth", "Mars",
+// "+ New domain") — the user corrected this directly: a domain isn't
+// a place you name, it's derived from your own identity (the wallet
+// key). No domain/DAG exists at all until a wallet exists; once one
+// does, the domain id is deterministic (a short hash of the public
+// key), never chosen.
 //
-// Also fixed: Solana burn (§24.6(v)) requires reaching Solana's
-// network, which a domain that has never had connectivity to Earth's
-// networks cannot do, ever — the user caught this directly ("impossible
-// qu'on brûle du solana sur Mars"). Local PoW (§24.6(ii), local-pow.js)
-// is wired in as the network-independent alternative: same
-// "this domain has paid c_id" outcome, zero network dependency.
+// Local PoW as an identity mechanism was removed entirely — a second
+// direct correction: "on brûle du solana, point." Distance never makes
+// a burn impossible, only slower to confirm; there is no second
+// mechanism, only delay. The burn UI reflects this (an illustrative
+// delay field, not a blocking one — no real network-delay simulation
+// exists here, and pretending otherwise would be dishonest).
+//
+// Contacts show a domain hash and a delay, not a name — matching the
+// user's explicit spec. A "create test peer" affordance in Parameters
+// exists ONLY to demonstrate Reconcile in a single browser tab; it is
+// clearly labeled as testing, not a real second domain (a real one is
+// just another device running this same app with its own wallet).
 
 import { createLedger } from '../core/ledger-bridge.js';
 import { materializeG } from '../core/economics/g.js';
 import { loadSolanaWeb3, generateKeypair, keypairFromSecretKey, encryptSecretKey, decryptSecretKey } from '../core/identity/solana-wallet.js';
 import { registerDomainViaBurn } from '../core/identity/identity-flow.js';
 import { initialIdentityCostState, hasIdentityCost } from '../core/identity/identity-cost.js';
-import { minePowProof, registerLocalPow, initialLocalPowState, hasLocalPow } from '../core/identity/local-pow.js';
 import { SOLANA_NETWORKS, DEFAULT_NETWORK } from '../core/identity/solana-networks.js';
 import { materializeModuleRegistry } from '../core/modules/module-registry-reducer.js';
 import { rankFromIdentityAndCadence } from '../core/modules/module-rank.js';
@@ -32,40 +35,49 @@ import { buildSubmissionEvent, validateSubmission, initialSubmissionState, recor
 
 const WALLET_STORAGE_PREFIX = 'aiwa-wallet-';
 const DESKTOP_PIN_PREFIX = 'aiwa-desktop-pins-';
+const CONTACT_DELAY_PREFIX = 'aiwa-contact-delay-';
+
+// ── Domain identity: derived from a wallet's public key, never typed ─
+
+async function deriveDomainId(publicKeyBytes) {
+  const digest = await crypto.subtle.digest('SHA-256', publicKeyBytes);
+  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hex.slice(0, 12); // short, stable, deterministic — not chosen
+}
 
 // ── Domain replica ──────────────────────────────────────────────────
 
 class DomainReplica {
-  constructor(name, dag) {
-    this.name = name;
+  constructor(id, dag, keypair) {
+    this.id = id;
     this.dag = dag;
+    this.keypair = keypair;
     this.genesisId = null;
     this.lastEventId = null;
     this.lastCadenceId = null;
     this.epoch = 0;
     this.pending = [];
-    this.keypair = null;
   }
 
   async advanceCadence() {
     const nextEpoch = this.epoch + 1;
     const parents = [...new Set([this.lastCadenceId ?? this.genesisId, this.lastEventId])];
-    const id = await this.dag.addEvent(parents, { type: 'cadence', domain: this.name, epoch: nextEpoch });
+    const id = await this.dag.addEvent(parents, { type: 'cadence', domain: this.id, epoch: nextEpoch });
     this.lastCadenceId = id;
     this.lastEventId = id;
     this.epoch = nextEpoch;
     return id;
   }
 
-  commit(amount) {
-    this.pending.push({ b: amount, q0: this.epoch });
+  commit(amount, patienceRate = 0) {
+    this.pending.push({ b: amount, q0: this.epoch, T: patienceRate });
   }
 
   async claim() {
     const claimed = this.pending;
     this.pending = [];
     for (const c of claimed) {
-      const id = await this.dag.addEvent([this.lastEventId], { type: 'accrual', domain: this.name, b: c.b, q0: c.q0 });
+      const id = await this.dag.addEvent([this.lastEventId], { type: 'accrual', domain: this.id, b: c.b, q0: c.q0, T: c.T });
       this.lastEventId = id;
     }
     return claimed.length;
@@ -85,7 +97,7 @@ class DomainReplica {
   }
 
   async init() {
-    this.genesisId = await this.dag.addEvent([], { type: 'genesis', domain: this.name });
+    this.genesisId = await this.dag.addEvent([], { type: 'genesis', domain: this.id });
     this.lastEventId = this.genesisId;
   }
 
@@ -95,17 +107,14 @@ class DomainReplica {
 
 // ── Global state ────────────────────────────────────────────────────
 
-let theta = { reward: { K: 1, alpha: 1, beta: 1 }, budgets: {} };
-const domains = new Map(); // name -> DomainReplica, created on demand — no fixed count
-let activeDomainName = null;
+let theta = { reward: { alpha: 1.1, beta: 2.2, gamma: 3, C: 33 ** 3, minQ: 1 }, budgets: {} };
+let myDomain = null; // the one real domain this app instance represents — null until a wallet exists
+let testPeers = new Map(); // id -> DomainReplica, testing-only, never the primary UI concept
 let identityState = initialIdentityCostState();
-let powState = initialLocalPowState();
 let submissionState = initialSubmissionState();
 let solanaWeb3 = null;
 
-function activeReplica() { return domains.get(activeDomainName); }
 function currentNetwork() { return document.getElementById('network-select').value || DEFAULT_NETWORK; }
-function domainHasIdentity(name) { return hasIdentityCost(identityState, name) || hasLocalPow(powState, name); }
 function log(msg) {
   const line = document.createElement('div');
   line.textContent = `▸ ${msg}`;
@@ -117,61 +126,77 @@ function setMsg(elId, text, kind) {
   el.className = `msg ${kind ?? ''}`;
 }
 
-async function createDomain(name) {
-  if (domains.has(name)) throw new Error(`Domain '${name}' already exists.`);
-  const replica = new DomainReplica(name, await createLedger());
-  await replica.init();
-  domains.set(name, replica);
-  theta = { ...theta, budgets: { ...theta.budgets, [name]: 1000 } };
-  return replica;
+function pinnedIds(domainId) {
+  try { return JSON.parse(localStorage.getItem(DESKTOP_PIN_PREFIX + domainId) || '[]'); } catch { return []; }
 }
-
-// ── Desktop pin state (local-only, not replicated) ───────────────────
-
-function pinnedIds(domain) {
-  try { return JSON.parse(localStorage.getItem(DESKTOP_PIN_PREFIX + domain) || '[]'); } catch { return []; }
-}
-function setPinned(domain, ids) { localStorage.setItem(DESKTOP_PIN_PREFIX + domain, JSON.stringify(ids)); }
-function togglePin(domain, id) {
-  const ids = pinnedIds(domain);
+function setPinned(domainId, ids) { localStorage.setItem(DESKTOP_PIN_PREFIX + domainId, JSON.stringify(ids)); }
+function togglePin(domainId, id) {
+  const ids = pinnedIds(domainId);
   const idx = ids.indexOf(id);
   if (idx >= 0) ids.splice(idx, 1); else ids.push(id);
-  setPinned(domain, ids);
+  setPinned(domainId, ids);
+}
+
+function contactDelay(domainId) {
+  return parseFloat(localStorage.getItem(CONTACT_DELAY_PREFIX + domainId) || '0');
+}
+function setContactDelay(domainId, minutes) {
+  localStorage.setItem(CONTACT_DELAY_PREFIX + domainId, String(minutes));
 }
 
 // ── Wallet / identity ─────────────────────────────────────────────
 
-function walletStorageKey(domain) { return `${WALLET_STORAGE_PREFIX}${domain}`; }
+function walletStorageKey(domainId) { return `${WALLET_STORAGE_PREFIX}${domainId}`; }
 async function ensureSolanaWeb3() {
   if (!solanaWeb3) solanaWeb3 = await loadSolanaWeb3();
   return solanaWeb3;
 }
-async function createWallet(replica, password) {
+
+/** Creates a wallet, derives this app's one real domain from it, and boots the domain's DAG. */
+async function createWalletAndDomain(password) {
   const web3 = await ensureSolanaWeb3();
   const keypair = generateKeypair(web3);
+  const id = await deriveDomainId(keypair.publicKey.toBytes());
   const record = await encryptSecretKey(keypair.secretKey, password);
-  localStorage.setItem(walletStorageKey(replica.name), JSON.stringify(record));
-  replica.keypair = keypair;
+  localStorage.setItem(walletStorageKey(id), JSON.stringify(record));
+  localStorage.setItem('aiwa-my-domain-id', id);
+
+  myDomain = new DomainReplica(id, await createLedger(), keypair);
+  await myDomain.init();
+  theta = { ...theta, budgets: { ...theta.budgets, [id]: null } };
 }
-async function unlockWallet(replica, password) {
-  const raw = localStorage.getItem(walletStorageKey(replica.name));
-  if (!raw) throw new Error('No saved wallet for this domain — create one first.');
+
+/** Unlocks a previously-created wallet — requires knowing the domain id it was saved under. */
+async function unlockWalletAndDomain(password) {
+  const savedId = localStorage.getItem('aiwa-my-domain-id');
+  if (!savedId) throw new Error('No saved wallet on this device — create one first.');
+  const raw = localStorage.getItem(walletStorageKey(savedId));
+  if (!raw) throw new Error('No saved wallet for this domain.');
   const web3 = await ensureSolanaWeb3();
   const record = JSON.parse(raw);
   const secretKey = await decryptSecretKey(record, password);
-  replica.keypair = keypairFromSecretKey(web3, secretKey);
+  const keypair = keypairFromSecretKey(web3, secretKey);
+  const id = await deriveDomainId(keypair.publicKey.toBytes());
+
+  myDomain = new DomainReplica(id, await createLedger(), keypair);
+  await myDomain.init();
+  theta = { ...theta, budgets: { ...theta.budgets, [id]: null } };
 }
-async function registerIdentityViaBurn(replica) {
+
+async function registerIdentityViaBurn() {
+  if (!myDomain) return setMsg('burn-msg', 'Create a wallet first (Parameters).', 'error');
   const network = currentNetwork();
   const config = SOLANA_NETWORKS[network];
   const lamports = parseInt(document.getElementById('burn-amount').value, 10);
   if (!Number.isInteger(lamports) || lamports <= 0) {
     return setMsg('burn-msg', 'Enter a positive lamport amount — any amount is accepted, there is no minimum.', 'error');
   }
+  const delayMinutes = parseFloat(document.getElementById('burn-delay').value) || 0;
   const solAmount = lamports / 1_000_000_000;
   const confirmed = confirm(
     `Burn ${lamports} lamports (${solAmount} SOL) on ${config.label}?\n\n` +
       `This is sent to the network's incinerator address and is irreversible.\n` +
+      (delayMinutes > 0 ? `Illustrative: at this distance, confirmation might take ~${delayMinutes} min (informational only).\n` : '') +
       (config.isRealCost ? 'This is REAL money on mainnet.' : 'This is free devnet SOL — no real cost, testing only.')
   );
   if (!confirmed) return;
@@ -179,30 +204,12 @@ async function registerIdentityViaBurn(replica) {
   const web3 = await ensureSolanaWeb3();
   setMsg('burn-msg', 'Broadcasting burn transaction…');
   try {
-    const result = await registerDomainViaBurn(web3, replica.keypair, identityState, { domain: replica.name, lamports, network });
+    const result = await registerDomainViaBurn(web3, myDomain.keypair, identityState, { domain: myDomain.id, lamports, network });
     identityState = result.state;
     setMsg('burn-msg', `✅ Registered — tx ${result.signature.slice(0, 12)}…`, 'success');
-    log(`[${replica.name}] identity registered via SOL burn — tx ${result.signature}`);
+    log(`[${myDomain.id}] identity registered via SOL burn — tx ${result.signature}`);
   } catch (err) {
     setMsg('burn-msg', `❌ ${err.message}`, 'error');
-  }
-  renderAll();
-}
-async function registerIdentityViaPow(replica) {
-  const difficulty = parseInt(document.getElementById('pow-difficulty').value, 10) || 16;
-  setMsg('pow-msg', `Mining locally at difficulty ${difficulty}… (no network involved)`);
-  try {
-    const proof = await minePowProof(replica.name, difficulty);
-    const result = await registerLocalPow(powState, proof);
-    if (!result.accepted) {
-      setMsg('pow-msg', `❌ ${result.reason}`, 'error');
-      return;
-    }
-    powState = result.state;
-    setMsg('pow-msg', `✅ Registered — nonce ${proof.nonce}, hash ${proof.hash.slice(0, 12)}…`, 'success');
-    log(`[${replica.name}] identity registered via local PoW — nonce ${proof.nonce}, difficulty ${difficulty}`);
-  } catch (err) {
-    setMsg('pow-msg', `❌ ${err.message}`, 'error');
   }
   renderAll();
 }
@@ -224,29 +231,25 @@ function showDesktop() {
 
 // ── Renderers ─────────────────────────────────────────────────────
 
-function renderDomainSwitcher() {
-  const pillsEl = document.getElementById('domain-pills');
-  pillsEl.innerHTML = '';
-  for (const name of domains.keys()) {
-    const btn = document.createElement('button');
-    btn.className = 'domain-switch-btn' + (name === activeDomainName ? ' active' : '');
-    btn.textContent = name;
-    btn.addEventListener('click', () => { activeDomainName = name; showDesktop(); renderAll(); });
-    pillsEl.appendChild(btn);
-  }
-}
-
 function renderDesktop() {
-  const replica = activeReplica();
-  if (!replica) return;
-  const gState = replica.materialize();
-  const domain = replica.name;
-  document.getElementById('desktop-title').textContent = `Desktop — ${domain}`;
-  document.getElementById('d-epoch').textContent = gState.cadence.domains[domain]?.epoch ?? 0;
-  document.getElementById('d-balance').textContent = gState.balances[domain] ?? 0;
+  const noWalletEl = document.getElementById('no-wallet-notice');
+  const badgeEl = document.getElementById('my-domain-badge');
+  if (!myDomain) {
+    noWalletEl.style.display = 'block';
+    badgeEl.style.display = 'none';
+    return;
+  }
+  noWalletEl.style.display = 'none';
+  badgeEl.style.display = 'block';
+  document.getElementById('my-domain-id').textContent = myDomain.id;
 
-  const registry = replica.materializeModules();
-  const pinned = new Set(pinnedIds(domain));
+  const gState = myDomain.materialize();
+  document.getElementById('desktop-title').textContent = `Desktop — ${myDomain.id}`;
+  document.getElementById('d-epoch').textContent = gState.cadence.domains[myDomain.id]?.epoch ?? 0;
+  document.getElementById('d-balance').textContent = gState.balances[myDomain.id] ?? 0;
+
+  const registry = myDomain.materializeModules();
+  const pinned = new Set(pinnedIds(myDomain.id));
   const pinnedModules = Object.values(registry.modules)
     .filter((m) => pinned.has(m.id))
     .map((m) => ({ ...m, rank: rankFromIdentityAndCadence(identityState, gState.cadence, m.author, theta.reward) }))
@@ -266,11 +269,10 @@ function renderDesktop() {
 }
 
 function renderDomainScreen() {
-  const replica = activeReplica();
-  if (!replica) return;
-  const gState = replica.materialize();
-  const registry = replica.materializeModules();
-  const pinned = new Set(pinnedIds(replica.name));
+  if (!myDomain) return;
+  const gState = myDomain.materialize();
+  const registry = myDomain.materializeModules();
+  const pinned = new Set(pinnedIds(myDomain.id));
   const modules = Object.values(registry.modules).map((m) => ({
     ...m,
     rank: rankFromIdentityAndCadence(identityState, gState.cadence, m.author, theta.reward),
@@ -290,24 +292,21 @@ function renderDomainScreen() {
     row.className = 'catalog-row';
     const isPinned = pinned.has(m.id);
     row.innerHTML = `<div class="catalog-icon">${m.icon || '⬡'}</div><div class="catalog-info"><div class="catalog-name">${m.name}</div><div class="catalog-meta">rank ${m.rank.toFixed(2)} · ${m.auditStatus}</div></div><button data-id="${m.id}">${isPinned ? '− Remove' : '+ Add'}</button>`;
-    row.querySelector('button').addEventListener('click', () => { togglePin(replica.name, m.id); renderAll(); });
+    row.querySelector('button').addEventListener('click', () => { togglePin(myDomain.id, m.id); renderAll(); });
     listEl.appendChild(row);
   }
 }
 
 function renderProfileScreen() {
-  const replica = activeReplica();
-  if (!replica) return;
-  const registered = domainHasIdentity(replica.name);
-  const via = hasIdentityCost(identityState, replica.name) ? 'SOL burn' : hasLocalPow(powState, replica.name) ? 'local PoW' : null;
-  document.getElementById('profile-title').textContent = `Profile — ${replica.name}`;
+  if (!myDomain) return;
+  const registered = hasIdentityCost(identityState, myDomain.id);
   document.getElementById('profile-identity-status').textContent = registered
-    ? `✅ registered via ${via}`
-    : replica.keypair ? '🔓 wallet ready, not registered' : '🔒 no identity';
+    ? `✅ registered — burned ${identityState.registered[myDomain.id].burnedLamports} lamports`
+    : '🔓 wallet ready, not registered';
   document.getElementById('profile-network').textContent = currentNetwork();
 
-  const registry = replica.materializeModules();
-  const pinned = new Set(pinnedIds(replica.name));
+  const registry = myDomain.materializeModules();
+  const pinned = new Set(pinnedIds(myDomain.id));
   const active = Object.values(registry.modules).filter((m) => pinned.has(m.id));
   const listEl = document.getElementById('profile-active-list');
   const emptyEl = document.getElementById('profile-active-empty');
@@ -321,21 +320,15 @@ function renderProfileScreen() {
 }
 
 function renderCommitScreen() {
-  const replica = activeReplica();
-  if (!replica) return;
-  document.getElementById('commit-burn-title').textContent = `🔥 Burn — ${replica.name}`;
-  document.getElementById('pow-title').textContent = `⛏️ Mine locally — ${replica.name}`;
-  document.getElementById('burn-btn').disabled = !replica.keypair || domainHasIdentity(replica.name);
-  document.getElementById('pow-btn').disabled = domainHasIdentity(replica.name);
+  if (!myDomain) return;
+  document.getElementById('burn-btn').disabled = hasIdentityCost(identityState, myDomain.id);
 }
 
 function renderContactsScreen() {
-  const replica = activeReplica();
-  if (!replica) return;
-  const state = replica.materialize();
-  document.getElementById('contacts-domain-name').textContent = replica.name;
+  if (!myDomain) return;
+  const state = myDomain.materialize();
   const query = (document.getElementById('contacts-search').value || '').toLowerCase();
-  const others = Object.keys(state.cadence.domains).filter((d) => d !== replica.name && d.toLowerCase().includes(query));
+  const others = Object.keys(state.cadence.domains).filter((d) => d !== myDomain.id && d.toLowerCase().includes(query));
   const listEl = document.getElementById('contacts-list');
   const emptyEl = document.getElementById('contacts-empty');
   if (others.length === 0) {
@@ -344,7 +337,14 @@ function renderContactsScreen() {
     return;
   }
   emptyEl.style.display = 'none';
-  listEl.innerHTML = others.map((d) => `<div class="contact-row"><span>${d}</span><span>epoch ${state.cadence.domains[d].epoch}</span></div>`).join('');
+  listEl.innerHTML = '';
+  for (const d of others) {
+    const row = document.createElement('div');
+    row.className = 'contact-row';
+    row.innerHTML = `<div class="contact-hash">${d}</div><div class="contact-delay">epoch ${state.cadence.domains[d].epoch} · delay: <input type="number" min="0" step="1" value="${contactDelay(d)}" style="width:4rem;display:inline-block" data-domain="${d}"> min</div>`;
+    row.querySelector('input').addEventListener('change', (e) => setContactDelay(d, parseFloat(e.target.value) || 0));
+    listEl.appendChild(row);
+  }
 }
 
 function renderParametersScreen() {
@@ -356,14 +356,15 @@ function renderParametersScreen() {
     ? '⚠️ Mainnet mode: burns use <strong>real SOL</strong> and are <strong>irreversible</strong>.'
     : 'Devnet mode: burns use free faucet SOL and provide <strong>no real Sybil resistance</strong> (§24).';
 
-  document.getElementById('param-K').value = theta.reward.K;
   document.getElementById('param-alpha').value = theta.reward.alpha;
   document.getElementById('param-beta').value = theta.reward.beta;
+  document.getElementById('param-gamma').value = theta.reward.gamma;
+  document.getElementById('param-C').value = theta.reward.C;
+  document.getElementById('param-minQ').value = theta.reward.minQ;
 
-  const replica = activeReplica();
-  if (replica) {
-    const registered = domainHasIdentity(replica.name);
-    document.getElementById('c-pending').textContent = replica.pending.length;
+  if (myDomain) {
+    const registered = hasIdentityCost(identityState, myDomain.id);
+    document.getElementById('c-pending').textContent = myDomain.pending.length;
     document.getElementById('commit-action-btn').disabled = !registered;
     document.getElementById('claim-btn').disabled = !registered;
     document.getElementById('claim-gated-hint').style.display = registered ? 'none' : 'block';
@@ -372,19 +373,17 @@ function renderParametersScreen() {
   const targetSelect = document.getElementById('reconcile-target');
   const currentTarget = targetSelect.value;
   targetSelect.innerHTML = '';
-  const others = [...domains.keys()].filter((d) => d !== activeDomainName);
-  for (const d of others) {
+  for (const id of testPeers.keys()) {
     const opt = document.createElement('option');
-    opt.value = d;
-    opt.textContent = d;
+    opt.value = id;
+    opt.textContent = id;
     targetSelect.appendChild(opt);
   }
-  if (others.includes(currentTarget)) targetSelect.value = currentTarget;
-  document.getElementById('reconcile-btn').disabled = others.length === 0;
+  if (testPeers.has(currentTarget)) targetSelect.value = currentTarget;
+  document.getElementById('reconcile-btn').disabled = testPeers.size === 0 || !myDomain;
 }
 
 function renderAll() {
-  renderDomainSwitcher();
   renderDesktop();
   renderDomainScreen();
   renderProfileScreen();
@@ -393,26 +392,38 @@ function renderAll() {
   renderParametersScreen();
 }
 
-// ── Reconcile: always a specific pair, never a global toggle ─────────
+// ── Reconcile (testing-only peer) ────────────────────────────────────
 
-async function reconcile(withName) {
-  const a = activeReplica();
-  const b = domains.get(withName);
-  if (!a || !b) return;
-  a.dag.merge(b.dag);
-  b.dag.merge(a.dag);
-  const aFromA = a.materialize().balances[a.name] ?? 0;
-  const aFromB = b.materialize().balances[a.name] ?? 0;
-  const converged = aFromA === aFromB;
-  log(`[${a.name}] reconciled with [${b.name}] (${a.dag.size} events on both sides now).`);
+async function createTestPeer() {
+  const web3 = await ensureSolanaWeb3();
+  const keypair = generateKeypair(web3);
+  const id = await deriveDomainId(keypair.publicKey.toBytes());
+  const replica = new DomainReplica(id, await createLedger(), keypair);
+  await replica.init();
+  theta = { ...theta, budgets: { ...theta.budgets, [id]: null } };
+  testPeers.set(id, replica);
+  log(`Test peer '${id}' created (testing only — not part of the real protocol).`);
+  renderAll();
+}
+
+async function reconcileWithTestPeer(peerId) {
+  if (!myDomain) return;
+  const peer = testPeers.get(peerId);
+  if (!peer) return;
+  myDomain.dag.merge(peer.dag);
+  peer.dag.merge(myDomain.dag);
+  const mineFromMine = myDomain.materialize().balances[myDomain.id] ?? 0;
+  const mineFromPeer = peer.materialize().balances[myDomain.id] ?? 0;
+  const converged = mineFromMine === mineFromPeer;
+  log(`Reconciled with test peer '${peerId}' (${myDomain.dag.size} events on both sides now).`);
   log(converged ? 'Convergence check passed: both replicas agree (§9).' : 'Convergence check FAILED — bug.');
   renderAll();
 }
 
-// ── Submission (real pipeline: sign, hash-check, validate, fold) ────
+// ── Submission ────────────────────────────────────────────────────
 
-async function submitPluginCode(replica) {
-  if (!replica.keypair) return setMsg('submit-msg', 'Create or unlock a wallet first (Parameters).', 'error');
+async function submitPluginCode() {
+  if (!myDomain) return setMsg('submit-msg', 'Create a wallet first (Parameters).', 'error');
   const moduleId = document.getElementById('submit-id').value.trim();
   const codeUrl = document.getElementById('submit-url').value.trim();
   const code = document.getElementById('submit-code').value;
@@ -420,9 +431,9 @@ async function submitPluginCode(replica) {
 
   setMsg('submit-msg', 'Hashing and signing…');
   const codeHash = await computeModuleHash(code);
-  const seed = replica.keypair.secretKey.slice(0, 32);
-  const pubkeyBytes = replica.keypair.publicKey.toBytes();
-  const existing = replica.materializeModules().modules[moduleId];
+  const seed = myDomain.keypair.secretKey.slice(0, 32);
+  const pubkeyBytes = myDomain.keypair.publicKey.toBytes();
+  const existing = myDomain.materializeModules().modules[moduleId];
 
   const event = buildSubmissionEvent(
     { moduleId, codeHash, codeUrl, name: moduleId, icon: '⬡', category: 'Tools', description: '', isIssuing: false, timeSensitive: null, economicConfig: null },
@@ -435,33 +446,15 @@ async function submitPluginCode(replica) {
     return;
   }
   submissionState = recordNonce(submissionState, event.nonce);
-  await replica.foldSubmission(event, Boolean(existing));
+  await myDomain.foldSubmission(event, Boolean(existing));
   setMsg('submit-msg', `✅ ${existing ? 'Updated' : 'Registered'} '${moduleId}' — hash verified for real, signature verified for real.`, 'success');
-  log(`[${replica.name}] plugin '${moduleId}' ${existing ? 'updated' : 'submitted'} via signed pipeline`);
+  log(`[${myDomain.id}] plugin '${moduleId}' ${existing ? 'updated' : 'submitted'} via signed pipeline`);
   renderAll();
 }
 
 // ── Boot ──────────────────────────────────────────────────────────
 
 async function main() {
-  await createDomain('earth');
-  await createDomain('mars');
-  activeDomainName = 'earth';
-
-  document.getElementById('add-domain-btn').addEventListener('click', async () => {
-    const name = prompt('New domain name (e.g. an outpost, a person, anything — no relation to any other domain implied):');
-    if (!name) return;
-    try {
-      await createDomain(name.trim());
-      activeDomainName = name.trim();
-      log(`Domain '${name.trim()}' created.`);
-      showDesktop();
-      renderAll();
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-
   document.querySelectorAll('.nav-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (btn.classList.contains('active')) { showDesktop(); return; }
@@ -469,44 +462,43 @@ async function main() {
     });
   });
 
-  document.getElementById('burn-btn').addEventListener('click', () => registerIdentityViaBurn(activeReplica()));
-  document.getElementById('pow-btn').addEventListener('click', () => registerIdentityViaPow(activeReplica()));
-  document.getElementById('submit-btn').addEventListener('click', () => submitPluginCode(activeReplica()));
+  document.getElementById('advance-btn').addEventListener('click', async () => {
+    if (!myDomain) return;
+    await myDomain.advanceCadence();
+    renderAll();
+  });
+
+  document.getElementById('burn-btn').addEventListener('click', registerIdentityViaBurn);
+  document.getElementById('submit-btn').addEventListener('click', submitPluginCode);
 
   document.getElementById('commit-action-btn').addEventListener('click', () => {
-    const replica = activeReplica();
-    replica.commit(10);
-    log(`[${replica.name}] staked claim b=10 at q0=${replica.epoch}`);
+    if (!myDomain) return;
+    const T = parseFloat(document.getElementById('patience-rate').value) || 0;
+    myDomain.commit(10, T);
+    log(`[${myDomain.id}] staked claim b=10 at q0=${myDomain.epoch}, T=${T}`);
     renderAll();
   });
   document.getElementById('claim-btn').addEventListener('click', async () => {
-    const replica = activeReplica();
-    const n = await replica.claim();
-    log(n > 0 ? `[${replica.name}] claimed ${n} commitment(s).` : `[${replica.name}] nothing to claim.`);
-    renderAll();
-  });
-  document.getElementById('advance-btn')?.addEventListener('click', async () => {
-    const replica = activeReplica();
-    await replica.advanceCadence();
+    if (!myDomain) return;
+    const n = await myDomain.claim();
+    log(n > 0 ? `[${myDomain.id}] claimed ${n} commitment(s).` : `[${myDomain.id}] nothing to claim.`);
     renderAll();
   });
 
   document.getElementById('wallet-create-btn').addEventListener('click', async () => {
-    const replica = activeReplica();
     const pw = document.getElementById('wallet-pw').value;
     if (!pw) return setMsg('wallet-msg', 'Enter a password first.', 'error');
-    await createWallet(replica, pw);
-    setMsg('wallet-msg', `Wallet created: ${replica.keypair.publicKey.toBase58()}`, 'success');
-    log(`[${replica.name}] wallet created`);
+    await createWalletAndDomain(pw);
+    setMsg('wallet-msg', `Wallet created — domain id: ${myDomain.id}`, 'success');
+    log(`Wallet created — domain id ${myDomain.id}`);
     renderAll();
   });
   document.getElementById('wallet-unlock-btn').addEventListener('click', async () => {
-    const replica = activeReplica();
     const pw = document.getElementById('wallet-pw').value;
     try {
-      await unlockWallet(replica, pw);
-      setMsg('wallet-msg', `Wallet unlocked: ${replica.keypair.publicKey.toBase58()}`, 'success');
-      log(`[${replica.name}] wallet unlocked`);
+      await unlockWalletAndDomain(pw);
+      setMsg('wallet-msg', `Wallet unlocked — domain id: ${myDomain.id}`, 'success');
+      log(`Wallet unlocked — domain id ${myDomain.id}`);
     } catch (err) {
       setMsg('wallet-msg', `❌ ${err.message}`, 'error');
     }
@@ -516,27 +508,30 @@ async function main() {
   document.getElementById('network-select').addEventListener('change', renderAll);
   document.getElementById('contacts-search').addEventListener('input', renderContactsScreen);
 
-  ['param-K', 'param-alpha', 'param-beta'].forEach((id) => {
+  ['param-alpha', 'param-beta', 'param-gamma', 'param-C', 'param-minQ'].forEach((id) => {
     document.getElementById(id).addEventListener('change', () => {
       theta = {
         ...theta,
         reward: {
-          K: parseFloat(document.getElementById('param-K').value) || 0,
           alpha: parseFloat(document.getElementById('param-alpha').value) || 0,
           beta: parseFloat(document.getElementById('param-beta').value) || 0,
+          gamma: parseFloat(document.getElementById('param-gamma').value) || 0,
+          C: parseFloat(document.getElementById('param-C').value) || 0,
+          minQ: parseFloat(document.getElementById('param-minQ').value) || 0,
         },
       };
       renderAll();
     });
   });
 
+  document.getElementById('create-test-peer-btn').addEventListener('click', createTestPeer);
   document.getElementById('reconcile-btn').addEventListener('click', () => {
     const target = document.getElementById('reconcile-target').value;
-    if (target) reconcile(target);
+    if (target) reconcileWithTestPeer(target);
   });
 
   renderAll();
-  document.getElementById('status').textContent = 'Ready — N independent domains, reconciled pairwise, never globally.';
+  document.getElementById('status').textContent = 'Ready — create or unlock a wallet to begin.';
 }
 
 main().catch((err) => {
