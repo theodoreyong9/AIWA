@@ -11,12 +11,7 @@
     h1 { margin: 0.8rem 1rem 0.1rem; font-size: 1.3rem; }
     #subtitle { margin: 0 1rem 0.4rem; color: #666; font-size: 0.82rem; }
     #status { margin: 0 1rem 0.5rem; color: #555; font-size: 0.8rem; }
-
-    #domain-switcher { display: flex; gap: 0.4rem; margin: 0.5rem 1rem; align-items: center; }
-    #domain-pills { display: flex; gap: 0.35rem; flex: 1; overflow-x: auto; }
-    .domain-switch-btn { flex: 0 0 auto; padding: 0.45rem 0.7rem; border-radius: 8px; border: 1px solid #ccc; background: #f7f7f8; font: inherit; font-size: 0.85rem; white-space: nowrap; }
-    .domain-switch-btn.active { border-color: #333; background: #fff; font-weight: 700; }
-    #add-domain-btn { flex: 0 0 auto; font-size: 0.78rem; padding: 0.4rem 0.6rem; }
+    #my-domain-badge { margin: 0 1rem 0.6rem; font-family: ui-monospace, monospace; font-size: 0.78rem; color: #444; background: #f2f2f4; border-radius: 6px; padding: 0.4rem 0.6rem; }
 
     .screen { display: none; padding: 0 1rem; }
     .screen.active { display: block; }
@@ -40,18 +35,16 @@
     .msg.success { color: #1a8a4a; }
     .hint { font-size: 0.73rem; color: #888; margin-top: 0.3rem; }
 
+    #no-wallet-notice { margin: 1rem; padding: 0.8rem; border: 1px dashed #999; border-radius: 10px; font-size: 0.85rem; color: #444; }
+
     #network-warning { font-size: 0.76rem; padding: 0.5rem 0.6rem; border-radius: 6px; margin-bottom: 0.6rem; background: #fff6e5; border: 1px solid #f0d090; color: #a35a00; }
     #network-warning.mainnet { background: #fff0f0; border-color: #f0a0a0; color: #a30000; font-weight: 600; }
-    #link-status.up { color: #1a8a4a; }
-    #link-status.down { color: #b33; }
 
-    /* Desktop (default/home screen) */
     #desktop-icons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; margin-top: 0.4rem; }
     .icon-tile { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; font-size: 0.66rem; text-align: center; }
     .icon-tile .icon-glyph { font-size: 1.6rem; width: 3rem; height: 3rem; display: flex; align-items: center; justify-content: center; background: #f2f2f4; border-radius: 12px; border: 1px solid #e0e0e0; }
     #desktop-empty { color: #999; font-size: 0.85rem; padding: 1.5rem 0; text-align: center; }
 
-    /* Domain screen: catalog list */
     .catalog-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid #eee; }
     .catalog-row .catalog-icon { font-size: 1.3rem; width: 2rem; text-align: center; }
     .catalog-row .catalog-info { flex: 1; min-width: 0; }
@@ -60,7 +53,9 @@
     .catalog-row button { font-size: 0.72rem; padding: 0.3rem 0.5rem; flex-shrink: 0; }
     #catalog-empty { color: #999; font-size: 0.85rem; padding: 0.8rem 0; text-align: center; }
 
-    #contacts-list .contact-row { padding: 0.5rem 0; border-bottom: 1px solid #eee; font-size: 0.86rem; display: flex; justify-content: space-between; }
+    #contacts-list .contact-row { padding: 0.5rem 0; border-bottom: 1px solid #eee; }
+    #contacts-list .contact-hash { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+    #contacts-list .contact-delay { font-size: 0.72rem; color: #888; }
     #contacts-empty { color: #999; font-size: 0.82rem; padding: 0.8rem 0; text-align: center; }
 
     #log-list { font-family: ui-monospace, monospace; font-size: 0.72rem; color: #555; max-height: 6rem; overflow-y: auto; background: #f7f7f8; border: 1px solid #ddd; border-radius: 8px; padding: 0.4rem 0.6rem; }
@@ -71,52 +66,46 @@
     .nav-btn .nav-icon { font-size: 1.1rem; }
     .nav-btn.active { color: #1a1a1a; font-weight: 700; }
   </style>
-  <script type="importmap">
-  {
-    "imports": {
-      "@noble/curves/ed25519": "https://esm.sh/@noble/curves@1.7.0/ed25519"
-    }
-  }
-  </script>
 </head>
 <body>
   <main id="app">
     <h1>AIWA</h1>
     <p id="subtitle">Autonomous Interplanetary Web Application</p>
     <p id="status">Initializing…</p>
+    <p id="my-domain-badge" style="display:none">domain: <span id="my-domain-id"></span></p>
 
-    <div id="domain-switcher">
-      <div id="domain-pills"></div>
-      <button id="add-domain-btn" title="Create a new domain">+ New domain</button>
+    <div id="no-wallet-notice">
+      No identity yet. Open <strong>Parameters → Wallet</strong> to create one — your domain id is derived from your wallet, not chosen.
     </div>
 
-    <!-- ══ DESKTOP (default/home screen — no nav button, always underneath) ══ -->
     <section id="screen-desktop" class="screen active">
       <div class="card">
-        <h2 id="desktop-title">Desktop — Earth</h2>
+        <h2 id="desktop-title">Desktop</h2>
         <div class="stat-row"><span>Cadence epoch</span><span id="d-epoch">0</span></div>
         <div class="stat-row"><span>Balance</span><span id="d-balance">0</span></div>
         <button id="advance-btn" class="full-btn">+ Cadence epoch</button>
-        <div id="desktop-empty">Empty. Open <strong>Domain</strong> below to add plugins.</div>
+      </div>
+
+      <div class="card">
+        <h2>Desktop — pinned plugins (by rank)</h2>
+        <div id="desktop-empty">No plugins pinned yet.</div>
         <div id="desktop-icons"></div>
       </div>
     </section>
 
-    <!-- ══ DOMAIN — plugin/theme catalog for the active domain ══ -->
     <section id="screen-domain" class="screen">
       <div class="card">
         <h2>Plugins available on this domain</h2>
-        <p class="hint">Registered on this domain's ledger (§27.4.2) — add to your desktop. To register a new one, use <strong>Commit → Submit plugin code</strong> (the one real, verified path — signed, hash-checked).</p>
+        <p class="hint">Registered on this domain's ledger (§27.4.2) — add to your desktop. To register a new one, use <strong>Commit → Submit plugin code</strong>.</p>
         <div id="catalog-empty">No plugins registered on this domain yet.</div>
         <div id="catalog-list"></div>
       </div>
     </section>
 
-    <!-- ══ PROFILE — identity + activated (desktop) plugin settings ══ -->
     <section id="screen-profile" class="screen">
       <div class="card">
-        <h2 id="profile-title">Profile — Earth</h2>
-        <p class="stat-row" id="profile-identity-status">🔒 No identity</p>
+        <h2>Profile</h2>
+        <p class="stat-row" id="profile-identity-status">🔒 no identity</p>
         <p class="stat-row"><span>Current network</span><span id="profile-network">devnet</span></p>
       </div>
       <div class="card">
@@ -127,24 +116,16 @@
       </div>
     </section>
 
-    <!-- ══ COMMIT — burn (identity) + submit plugin code ══ -->
     <section id="screen-commit" class="screen">
       <div class="card">
-        <h2 id="commit-burn-title">🔥 Burn — Earth</h2>
-        <p class="hint">Requires network access to Solana — impossible for a domain that has never had connectivity to Earth's networks (§24.6(v)'s real limitation).</p>
+        <h2>🔥 Burn — register identity</h2>
+        <p class="hint">Solana burn is the only identity mechanism — there is no local alternative. Distance never makes it impossible, only slower to confirm: the transaction sits pending until it reaches the network, however long that takes.</p>
         <input type="number" id="burn-amount" placeholder="Lamports to burn (any amount)" min="1" step="1" />
+        <label class="field-label">Illustrative confirmation delay (minutes) — informational only, not a real network measurement</label>
+        <input type="number" id="burn-delay" value="0" min="0" step="1" />
         <button id="burn-btn" class="full-btn" disabled>Burn to register identity</button>
         <p class="hint">No minimum — any positive burn is a real, irrecoverable cost and counts as c_id (§24.6(v)).</p>
         <p class="msg" id="burn-msg"></p>
-      </div>
-      <div class="card">
-        <h2 id="pow-title">⛏️ Mine locally — Earth</h2>
-        <p class="hint">No network needed at all (§24.6(ii)) — the only option for a domain that has never been able to reach Solana. Real CPU work, verified by recomputing the hash, not trusted on claim.</p>
-        <div class="row">
-          <div><label class="field-label">Difficulty (bits)</label><input type="number" id="pow-difficulty" value="16" min="4" max="24" /></div>
-        </div>
-        <button id="pow-btn" class="full-btn">Mine to register identity</button>
-        <p class="msg" id="pow-msg"></p>
       </div>
       <div class="card">
         <h2>📤 Submit plugin code</h2>
@@ -160,22 +141,20 @@
       </div>
     </section>
 
-    <!-- ══ CONTACTS ══ -->
     <section id="screen-contacts" class="screen">
       <div class="card">
-        <h2>Contacts — known to <span id="contacts-domain-name">Earth</span></h2>
-        <input id="contacts-search" placeholder="Search by network / domain name…" style="margin-bottom:0.5rem" />
-        <p class="hint">A domain only appears here once its history has actually merged into this domain's own DAG (§9).</p>
+        <h2>Contacts</h2>
+        <input id="contacts-search" placeholder="Search by domain hash…" style="margin-bottom:0.5rem" />
+        <p class="hint">A domain only appears here once its history has actually merged into this domain's own DAG (§9). Delay is an informational estimate you can set per contact — not a measured value.</p>
         <div id="contacts-empty">No other domains known yet.</div>
         <div id="contacts-list"></div>
       </div>
     </section>
 
-    <!-- ══ PARAMETERS — security, wallets, claim, network, theta, link ══ -->
     <section id="screen-parameters" class="screen">
       <div class="card">
-        <h2>Wallets</h2>
-        <label class="field-label">Solana wallet (burns SOL) / AIWA identity key (signs submissions) — same key, two roles</label>
+        <h2>Wallet — your identity</h2>
+        <p class="hint">Your domain id is derived from this wallet's public key. One key, two roles: burns SOL (§24.6(v)) and signs plugin submissions (§27.4.1).</p>
         <div class="row">
           <input type="password" id="wallet-pw" placeholder="Wallet password" />
         </div>
@@ -189,11 +168,13 @@
       <div class="card">
         <h2>Claim reward</h2>
         <div class="stat-row"><span>Pending commits</span><span id="c-pending">0</span></div>
+        <label class="field-label">Patience rate T (0–0.4, chosen per stake)</label>
+        <input type="number" id="patience-rate" value="0" min="0" max="0.4" step="0.05" style="margin-bottom:0.4rem" />
         <div class="row">
           <button id="commit-action-btn" disabled>Stake claim (b=10)</button>
           <button id="claim-btn" disabled>Claim</button>
         </div>
-        <p class="hint" id="claim-gated-hint">Requires identity registration (§24/§26).</p>
+        <p class="hint" id="claim-gated-hint">Requires identity registration.</p>
       </div>
 
       <div class="card">
@@ -206,19 +187,25 @@
       </div>
 
       <div class="card">
-        <h2>Reward parameters (θ) — r(b,q) = K·b^α·q^β</h2>
+        <h2>Reward parameters (θ) — Proof-of-Will structure</h2>
+        <p class="hint">r(b,q,q<sub>total</sub>,T) = (b · q<sup>α</sup>) / [ln(q<sub>total</sub><sup>β(1−T)</sup> + C)]<sup>γ</sup></p>
         <div class="row">
-          <div><label class="field-label">K</label><input type="number" id="param-K" step="0.1" /></div>
-          <div><label class="field-label">α</label><input type="number" id="param-alpha" step="0.1" /></div>
-          <div><label class="field-label">β</label><input type="number" id="param-beta" step="0.1" /></div>
+          <div><label class="field-label">α (on q)</label><input type="number" id="param-alpha" step="0.1" /></div>
+          <div><label class="field-label">β (on q_total)</label><input type="number" id="param-beta" step="0.1" /></div>
+          <div><label class="field-label">γ (outer)</label><input type="number" id="param-gamma" step="0.1" /></div>
+        </div>
+        <div class="row">
+          <div><label class="field-label">C (stabilization)</label><input type="number" id="param-C" step="1" /></div>
+          <div><label class="field-label">minQ (min wait, epochs)</label><input type="number" id="param-minQ" step="1" /></div>
         </div>
       </div>
 
       <div class="card">
-        <h2>Reconcile (interplanetary partition)</h2>
-        <p class="hint">No global "link" — connectivity is per pair and decided by whoever is actually in contact right now. Pick who this domain can currently reach.</p>
-        <select id="reconcile-target"></select>
-        <button id="reconcile-btn" class="full-btn" disabled>🔄 Reconcile with selected domain</button>
+        <h2>Testing — simulate a remote peer</h2>
+        <p class="hint">Not part of the real protocol — creates a second local identity purely so Reconcile can be demonstrated in a single browser. A real second domain is just another device running AIWA with its own wallet.</p>
+        <button id="create-test-peer-btn" class="full-btn">Create test peer</button>
+        <select id="reconcile-target" style="margin-top:0.5rem"></select>
+        <button id="reconcile-btn" class="full-btn" disabled>🔄 Reconcile with selected</button>
       </div>
 
       <div class="card">
