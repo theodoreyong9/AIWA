@@ -8,56 +8,65 @@
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; max-width: 30rem; margin: 0 auto; padding: 0 0 4.5rem; color: #1a1a1a; }
-    h1 { margin: 1rem 1rem 0.1rem; font-size: 1.4rem; }
-    #subtitle { margin: 0 1rem 0.4rem; color: #666; font-size: 0.85rem; }
-    #status { margin: 0 1rem 0.6rem; color: #555; font-size: 0.85rem; }
+    h1 { margin: 0.8rem 1rem 0.1rem; font-size: 1.3rem; }
+    #subtitle { margin: 0 1rem 0.4rem; color: #666; font-size: 0.82rem; }
+    #status { margin: 0 1rem 0.5rem; color: #555; font-size: 0.8rem; }
 
-    #domain-switcher { display: flex; gap: 0.4rem; margin: 0.6rem 1rem; }
-    .domain-switch-btn { flex: 1; padding: 0.5rem; border-radius: 8px; border: 1px solid #ccc; background: #f7f7f8; font: inherit; font-size: 0.9rem; }
+    #domain-switcher { display: flex; gap: 0.4rem; margin: 0.5rem 1rem; }
+    .domain-switch-btn { flex: 1; padding: 0.45rem; border-radius: 8px; border: 1px solid #ccc; background: #f7f7f8; font: inherit; font-size: 0.88rem; }
     .domain-switch-btn.active { border-color: #333; background: #fff; font-weight: 700; }
 
-    .app-panel { display: none; padding: 0 1rem; }
-    .app-panel.active { display: block; }
+    .screen { display: none; padding: 0 1rem; }
+    .screen.active { display: block; }
 
     .card { border: 1px solid #ddd; border-radius: 10px; padding: 0.8rem; margin-bottom: 0.7rem; background: #fff; }
-    .card h2 { font-size: 0.95rem; margin: 0 0 0.5rem; }
-    .stat-row { display: flex; justify-content: space-between; padding: 0.2rem 0; font-size: 0.9rem; border-bottom: 1px solid #eee; font-variant-numeric: tabular-nums; }
+    .card h2 { font-size: 0.92rem; margin: 0 0 0.5rem; }
+    .stat-row { display: flex; justify-content: space-between; padding: 0.2rem 0; font-size: 0.88rem; border-bottom: 1px solid #eee; font-variant-numeric: tabular-nums; }
     .stat-row span:first-child { color: #666; }
 
-    button { font: inherit; padding: 0.45rem 0.7rem; border-radius: 7px; border: 1px solid #999; background: #fff; }
+    button { font: inherit; padding: 0.42rem 0.65rem; border-radius: 7px; border: 1px solid #999; background: #fff; }
     button:disabled { opacity: 0.4; }
-    input, select { font: inherit; font-size: 0.85rem; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 6px; width: 100%; box-sizing: border-box; }
+    input, select, textarea { font: inherit; font-size: 0.84rem; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 6px; width: 100%; box-sizing: border-box; }
+    textarea { font-family: ui-monospace, monospace; font-size: 0.75rem; resize: vertical; }
+    label.field-label { font-size: 0.72rem; color: #888; display: block; margin: 0.4rem 0 0.15rem; }
 
     .row { display: flex; gap: 0.4rem; margin-bottom: 0.4rem; }
     .row > * { flex: 1; }
     .full-btn { width: 100%; margin-top: 0.3rem; font-weight: 600; }
-    .msg { font-size: 0.78rem; margin-top: 0.3rem; min-height: 1em; }
+    .msg { font-size: 0.76rem; margin-top: 0.3rem; min-height: 1em; }
     .msg.error { color: #b33; }
     .msg.success { color: #1a8a4a; }
-    .hint { font-size: 0.75rem; color: #888; margin-top: 0.3rem; }
+    .hint { font-size: 0.73rem; color: #888; margin-top: 0.3rem; }
 
-    #network-warning { font-size: 0.78rem; padding: 0.5rem 0.6rem; border-radius: 6px; margin-bottom: 0.6rem; background: #fff6e5; border: 1px solid #f0d090; color: #a35a00; }
+    #network-warning { font-size: 0.76rem; padding: 0.5rem 0.6rem; border-radius: 6px; margin-bottom: 0.6rem; background: #fff6e5; border: 1px solid #f0d090; color: #a35a00; }
     #network-warning.mainnet { background: #fff0f0; border-color: #f0a0a0; color: #a30000; font-weight: 600; }
-
     #link-status.up { color: #1a8a4a; }
     #link-status.down { color: #b33; }
 
-    #desktop-icons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin-top: 0.4rem; }
-    .icon-tile { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; font-size: 0.68rem; text-align: center; }
+    /* Desktop (default/home screen) */
+    #desktop-icons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; margin-top: 0.4rem; }
+    .icon-tile { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; font-size: 0.66rem; text-align: center; }
     .icon-tile .icon-glyph { font-size: 1.6rem; width: 3rem; height: 3rem; display: flex; align-items: center; justify-content: center; background: #f2f2f4; border-radius: 12px; border: 1px solid #e0e0e0; }
-    .icon-tile.unaudited .icon-glyph { border-style: dashed; }
-    .icon-tile.red-listed .icon-glyph { border-color: #c33; opacity: 0.5; }
-    #desktop-empty { color: #999; font-size: 0.82rem; padding: 0.8rem 0; text-align: center; }
+    #desktop-empty { color: #999; font-size: 0.85rem; padding: 1.5rem 0; text-align: center; }
 
-    #contacts-list .contact-row { padding: 0.5rem 0; border-bottom: 1px solid #eee; font-size: 0.88rem; display: flex; justify-content: space-between; }
+    /* Domain screen: catalog list */
+    .catalog-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid #eee; }
+    .catalog-row .catalog-icon { font-size: 1.3rem; width: 2rem; text-align: center; }
+    .catalog-row .catalog-info { flex: 1; min-width: 0; }
+    .catalog-row .catalog-name { font-size: 0.88rem; font-weight: 600; }
+    .catalog-row .catalog-meta { font-size: 0.7rem; color: #888; }
+    .catalog-row button { font-size: 0.72rem; padding: 0.3rem 0.5rem; flex-shrink: 0; }
+    #catalog-empty { color: #999; font-size: 0.85rem; padding: 0.8rem 0; text-align: center; }
+
+    #contacts-list .contact-row { padding: 0.5rem 0; border-bottom: 1px solid #eee; font-size: 0.86rem; display: flex; justify-content: space-between; }
     #contacts-empty { color: #999; font-size: 0.82rem; padding: 0.8rem 0; text-align: center; }
 
-    #log-list { font-family: ui-monospace, monospace; font-size: 0.74rem; color: #555; max-height: 7rem; overflow-y: auto; background: #f7f7f8; border: 1px solid #ddd; border-radius: 8px; padding: 0.4rem 0.6rem; }
+    #log-list { font-family: ui-monospace, monospace; font-size: 0.72rem; color: #555; max-height: 6rem; overflow-y: auto; background: #f7f7f8; border: 1px solid #ddd; border-radius: 8px; padding: 0.4rem 0.6rem; }
     #log-list div { padding: 0.08rem 0; }
 
-    #bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; display: flex; background: #fff; border-top: 1px solid #ddd; padding: 0.3rem 0.2rem calc(0.3rem + env(safe-area-inset-bottom)); z-index: 10; }
-    .nav-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.1rem; border: none; background: none; font-size: 0.65rem; color: #888; padding: 0.3rem 0; }
-    .nav-btn .nav-icon { font-size: 1.15rem; }
+    #bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; display: flex; background: #fff; border-top: 1px solid #ddd; padding: 0.3rem 0.2rem calc(0.3rem + env(safe-area-inset-bottom)); z-index: 10; max-width: 30rem; margin: 0 auto; }
+    .nav-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.1rem; border: none; background: none; font-size: 0.64rem; color: #888; padding: 0.3rem 0; }
+    .nav-btn .nav-icon { font-size: 1.1rem; }
     .nav-btn.active { color: #1a1a1a; font-weight: 700; }
   </style>
 </head>
@@ -72,79 +81,114 @@
       <button data-domain="mars" class="domain-switch-btn">🔴 Mars</button>
     </div>
 
-    <section id="panel-domain" class="app-panel active">
+    <!-- ══ DESKTOP (default/home screen — no nav button, always underneath) ══ -->
+    <section id="screen-desktop" class="screen active">
       <div class="card">
-        <h2 id="domain-title">Domain</h2>
+        <h2 id="desktop-title">Desktop — Earth</h2>
         <div class="stat-row"><span>Cadence epoch</span><span id="d-epoch">0</span></div>
         <div class="stat-row"><span>Balance</span><span id="d-balance">0</span></div>
-        <div class="stat-row"><span>Budget used</span><span id="d-budget">0</span></div>
-        <div class="stat-row"><span>Local events</span><span id="d-events">0</span></div>
-        <div class="stat-row"><span>Identity</span><span id="d-identity">🔒 none</span></div>
-        <button id="advance-btn" class="full-btn">+ Cadence epoch</button>
-      </div>
-
-      <div class="card">
-        <h2>Desktop — modules (sorted by rank)</h2>
-        <div id="desktop-empty">No modules registered on this domain yet.</div>
+        <div id="desktop-empty">Empty. Open <strong>Domain</strong> below to add plugins.</div>
         <div id="desktop-icons"></div>
-        <details style="margin-top:0.6rem">
-          <summary style="font-size:0.82rem;cursor:pointer">＋ Register a module</summary>
-          <div style="margin-top:0.5rem">
-            <div class="row">
-              <input id="mod-id" placeholder="id, e.g. weather.js" />
-              <input id="mod-icon" placeholder="icon" maxlength="4" style="flex:0 0 3.5rem" />
-            </div>
-            <input id="mod-name" placeholder="Display name" style="margin-bottom:0.4rem" />
-            <button id="mod-register-btn" class="full-btn">Register module</button>
-            <p class="hint">Requires a registered identity (see Profile). Rank = reward(burned lamports, cadence epochs) — the real §10 formula.</p>
-            <p class="msg" id="mod-msg"></p>
-          </div>
-        </details>
       </div>
     </section>
 
-    <section id="panel-commit" class="app-panel">
+    <!-- ══ DOMAIN — plugin/theme catalog for the active domain ══ -->
+    <section id="screen-domain" class="screen">
       <div class="card">
-        <h2 id="commit-title">Commit — Earth</h2>
-        <div class="stat-row"><span>Pending commits</span><span id="c-pending">0</span></div>
+        <h2>Plugins available on this domain</h2>
+        <p class="hint">Registered on this domain's ledger (§27.4.2) — add to your desktop, or register a new one below.</p>
+        <div id="catalog-empty">No plugins registered on this domain yet.</div>
+        <div id="catalog-list"></div>
+      </div>
+      <div class="card">
+        <h2>Register a new plugin</h2>
         <div class="row">
-          <button id="commit-btn" disabled>Commit (b=10)</button>
-          <button id="claim-btn" disabled>Claim reward</button>
+          <input id="mod-id" placeholder="id, e.g. weather.js" />
+          <input id="mod-icon" placeholder="icon" maxlength="4" style="flex:0 0 3.5rem" />
         </div>
-        <p class="hint" id="commit-gated-hint">Commit/Claim require identity registration (§24/§26).</p>
-        <p class="hint">"Commit" records a resource claim at the current epoch; "Claim" posts it — reward grows with cadence epochs elapsed between the two, never instantly (§10).</p>
+        <input id="mod-name" placeholder="Display name" style="margin-bottom:0.4rem" />
+        <button id="mod-register-btn" class="full-btn">Register</button>
+        <p class="hint">Requires a registered identity (see Parameters). Rank = reward(burned lamports, cadence epochs) — the real §10 formula.</p>
+        <p class="msg" id="mod-msg"></p>
       </div>
     </section>
 
-    <section id="panel-profile" class="app-panel">
+    <!-- ══ PROFILE — identity + activated (desktop) plugin settings ══ -->
+    <section id="screen-profile" class="screen">
       <div class="card">
         <h2 id="profile-title">Profile — Earth</h2>
-        <p class="stat-row" id="profile-identity-status">🔒 No wallet</p>
-        <div class="row">
-          <input type="password" id="wallet-pw" placeholder="Wallet password" />
-        </div>
-        <div class="row">
-          <button id="wallet-create-btn">Create wallet</button>
-          <button id="wallet-unlock-btn">Unlock wallet</button>
-        </div>
-        <input type="number" id="burn-amount" placeholder="Lamports to burn (any amount)" min="1" step="1" style="margin-top:0.5rem" />
-        <button id="burn-btn" class="full-btn" disabled>🔥 Register identity (burn)</button>
-        <p class="msg" id="profile-msg"></p>
+        <p class="stat-row" id="profile-identity-status">🔒 No identity</p>
+        <p class="stat-row"><span>Current network</span><span id="profile-network">devnet</span></p>
+      </div>
+      <div class="card">
+        <h2>Activated plugins (on desktop)</h2>
+        <p class="hint">Grouped by the network your identity is currently operating under.</p>
+        <div id="profile-active-empty" class="hint">None yet — add plugins from the Domain screen.</div>
+        <div id="profile-active-list"></div>
       </div>
     </section>
 
-    <section id="panel-contacts" class="app-panel">
+    <!-- ══ COMMIT — burn (identity) + submit plugin code ══ -->
+    <section id="screen-commit" class="screen">
       <div class="card">
-        <h2>Contacts — domains known to <span id="contacts-domain-name">Earth</span></h2>
-        <p class="hint">A domain only appears here once its history has actually merged into this domain's own DAG (§9) — not before, no matter how long the link has been up.</p>
+        <h2 id="commit-burn-title">🔥 Burn — Earth</h2>
+        <input type="number" id="burn-amount" placeholder="Lamports to burn (any amount)" min="1" step="1" />
+        <button id="burn-btn" class="full-btn" disabled>Burn to register identity</button>
+        <p class="hint">No minimum — any positive burn is a real, irrecoverable cost and counts as c_id (§24.6(v)).</p>
+        <p class="msg" id="burn-msg"></p>
+      </div>
+      <div class="card">
+        <h2>📤 Submit plugin code</h2>
+        <p class="hint">No GitHub push wired yet — paste the plugin's real code below; its hash is computed for real and checked for real, exactly as a fetched file would be, just without the network fetch.</p>
+        <label class="field-label">Module id</label>
+        <input id="submit-id" placeholder="weather.js" />
+        <label class="field-label">Code URL (where it will really be hosted)</label>
+        <input id="submit-url" placeholder="https://raw.githubusercontent.com/you/repo/main/weather.js" />
+        <label class="field-label">Code</label>
+        <textarea id="submit-code" rows="4" placeholder="window.YM_S['weather.js'] = { ... }"></textarea>
+        <button id="submit-btn" class="full-btn">Sign &amp; submit</button>
+        <p class="msg" id="submit-msg"></p>
+      </div>
+    </section>
+
+    <!-- ══ CONTACTS ══ -->
+    <section id="screen-contacts" class="screen">
+      <div class="card">
+        <h2>Contacts — known to <span id="contacts-domain-name">Earth</span></h2>
+        <input id="contacts-search" placeholder="Search by network / domain name…" style="margin-bottom:0.5rem" />
+        <p class="hint">A domain only appears here once its history has actually merged into this domain's own DAG (§9).</p>
         <div id="contacts-empty">No other domains known yet.</div>
         <div id="contacts-list"></div>
       </div>
     </section>
 
-    <section id="panel-parameters" class="app-panel">
+    <!-- ══ PARAMETERS — security, wallets, claim, network, theta, link ══ -->
+    <section id="screen-parameters" class="screen">
       <div class="card">
-        <h2>Solana network</h2>
+        <h2>Wallets</h2>
+        <label class="field-label">Solana wallet (burns SOL) / AIWA identity key (signs submissions) — same key, two roles</label>
+        <div class="row">
+          <input type="password" id="wallet-pw" placeholder="Wallet password" />
+        </div>
+        <div class="row">
+          <button id="wallet-create-btn">Create</button>
+          <button id="wallet-unlock-btn">Unlock</button>
+        </div>
+        <p class="msg" id="wallet-msg"></p>
+      </div>
+
+      <div class="card">
+        <h2>Claim reward</h2>
+        <div class="stat-row"><span>Pending commits</span><span id="c-pending">0</span></div>
+        <div class="row">
+          <button id="commit-action-btn" disabled>Commit (b=10)</button>
+          <button id="claim-btn" disabled>Claim</button>
+        </div>
+        <p class="hint" id="claim-gated-hint">Requires identity registration (§24/§26).</p>
+      </div>
+
+      <div class="card">
+        <h2>Security — Solana network</h2>
         <select id="network-select">
           <option value="devnet">Devnet (testing — free, no real Sybil resistance)</option>
           <option value="mainnet-beta">Mainnet (real SOL, irreversible)</option>
@@ -155,11 +199,10 @@
       <div class="card">
         <h2>Reward parameters (θ) — r(b,q) = K·b^α·q^β</h2>
         <div class="row">
-          <div><label class="hint">K</label><input type="number" id="param-K" step="0.1" /></div>
-          <div><label class="hint">α</label><input type="number" id="param-alpha" step="0.1" /></div>
-          <div><label class="hint">β</label><input type="number" id="param-beta" step="0.1" /></div>
+          <div><label class="field-label">K</label><input type="number" id="param-K" step="0.1" /></div>
+          <div><label class="field-label">α</label><input type="number" id="param-alpha" step="0.1" /></div>
+          <div><label class="field-label">β</label><input type="number" id="param-beta" step="0.1" /></div>
         </div>
-        <p class="hint">Changing these affects reward for every future Claim and module rank computation, for both domains.</p>
       </div>
 
       <div class="card">
@@ -179,11 +222,11 @@
   </main>
 
   <nav id="bottom-nav">
-    <button class="nav-btn active" data-panel="domain"><span class="nav-icon">🖥️</span>Domain</button>
-    <button class="nav-btn" data-panel="commit"><span class="nav-icon">✅</span>Commit</button>
-    <button class="nav-btn" data-panel="profile"><span class="nav-icon">👤</span>Profile</button>
-    <button class="nav-btn" data-panel="contacts"><span class="nav-icon">👥</span>Contacts</button>
-    <button class="nav-btn" data-panel="parameters"><span class="nav-icon">⚙️</span>Parameters</button>
+    <button class="nav-btn" data-screen="domain"><span class="nav-icon">🧩</span>Domain</button>
+    <button class="nav-btn" data-screen="profile"><span class="nav-icon">👤</span>Profile</button>
+    <button class="nav-btn" data-screen="commit"><span class="nav-icon">📤</span>Commit</button>
+    <button class="nav-btn" data-screen="contacts"><span class="nav-icon">👥</span>Contacts</button>
+    <button class="nav-btn" data-screen="parameters"><span class="nav-icon">⚙️</span>Parameters</button>
   </nav>
 
   <script type="module" src="./js/app/main.js"></script>
