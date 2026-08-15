@@ -204,6 +204,9 @@ impl ConservationState {
     }
 }
 
+pub mod conservation_bridge;
+pub use conservation_bridge::{apply_conservation_event, materialize_conservation};
+
 #[cfg(test)]
 mod tests {
     use super::*;
