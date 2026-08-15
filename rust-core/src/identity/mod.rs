@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 
+pub mod local_pow;
+pub use local_pow::{mine_pow_proof, verify_pow_proof, LocalPowState, PowProof};
+
 /// The Solana network's well-known incinerator address — a real,
 /// documented, unspendable address widely used across the Solana
 /// ecosystem for irrecoverable burns. See identity-cost.js's header for
