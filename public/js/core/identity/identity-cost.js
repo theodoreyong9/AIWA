@@ -52,20 +52,30 @@ export function initialIdentityCostState() {
  * boundary rather than re-deriving it.
  *
  * @param {NormalizedBurnTx} tx
- * @param {{ minLamports: number }} params
+ * @param {{ minLamports?: number }} [params]
  * @returns {{ valid: boolean, reason?: string }}
  */
-export function verifyBurnProof(tx, { minLamports }) {
+export function verifyBurnProof(tx, { minLamports = 0 } = {}) {
   if (tx.err !== null) {
     return { valid: false, reason: 'transaction failed on-chain (err is non-null)' };
   }
   if (tx.commitment !== 'finalized') {
     return { valid: false, reason: `commitment is '${tx.commitment}', not 'finalized' — not yet irreversible` };
   }
-  if (!Number.isFinite(tx.incineratorBalanceDeltaLamports) || tx.incineratorBalanceDeltaLamports < minLamports) {
+  // No fixed minimum by design — a burn of any positive size is a real,
+  // irrecoverable cost and counts as c_id. The only hard requirement is
+  // that something was actually burned (delta > 0), not a specific
+  // amount. minLamports is a per-deployment POLICY KNOB a caller may set
+  // above zero if they want one — it defaults to 0 (no floor) precisely
+  // because this project's stated position is that publishing/registration
+  // should stay maximally open, not gated by an arbitrary threshold.
+  if (!Number.isFinite(tx.incineratorBalanceDeltaLamports) || tx.incineratorBalanceDeltaLamports <= 0) {
+    return { valid: false, reason: 'no positive burn detected (incinerator balance did not increase)' };
+  }
+  if (tx.incineratorBalanceDeltaLamports < minLamports) {
     return {
       valid: false,
-      reason: `incinerator balance increased by ${tx.incineratorBalanceDeltaLamports} lamports, need >= ${minLamports}`,
+      reason: `incinerator balance increased by ${tx.incineratorBalanceDeltaLamports} lamports, need >= ${minLamports} (deployment-configured floor)`,
     };
   }
   return { valid: true };
@@ -80,10 +90,10 @@ export function verifyBurnProof(tx, { minLamports }) {
  * convention.
  *
  * @param {IdentityCostState} state
- * @param {{ domain: string, tx: NormalizedBurnTx, minLamports: number, now?: number }} params
+ * @param {{ domain: string, tx: NormalizedBurnTx, minLamports?: number, now?: number }} params
  * @returns {{ state: IdentityCostState, accepted: boolean, reason?: string }}
  */
-export function registerIdentityCost(state, { domain, tx, minLamports, now = Date.now() }) {
+export function registerIdentityCost(state, { domain, tx, minLamports = 0, now = Date.now() }) {
   if (state.usedSignatures[tx.signature]) {
     return { state, accepted: false, reason: `signature ${tx.signature} already used to back an identity` };
   }
