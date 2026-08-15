@@ -6,161 +6,185 @@
   <title>AIWA — Autonomous Interplanetary Web Application</title>
   <meta name="description" content="AIWA: reference architecture for identity, modular applications, and value accrual under arbitrarily long communication partition." />
   <style>
-    :root {
-      --link-up: #1a8a4a; --link-down: #b33; --bg-panel: #f7f7f8; --border: #ddd;
-    }
-    body { font-family: system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
-    h1 { margin-bottom: 0.1rem; }
-    #status { color: #555; font-size: 0.9rem; }
-    #explainer { color: #444; font-size: 0.92rem; line-height: 1.5; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; margin: 1rem 0; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 30rem; margin: 0 auto; padding: 0 0 4.5rem; color: #1a1a1a; }
+    h1 { margin: 1rem 1rem 0.1rem; font-size: 1.4rem; }
+    #subtitle { margin: 0 1rem 0.4rem; color: #666; font-size: 0.85rem; }
+    #status { margin: 0 1rem 0.6rem; color: #555; font-size: 0.85rem; }
 
-    #link-bar { display: flex; align-items: center; gap: 0.6rem; margin: 1.2rem 0; flex-wrap: wrap; }
-    #link-status { font-weight: 600; }
-    #link-status.up { color: var(--link-up); }
-    #link-status.down { color: var(--link-down); }
-    button { font: inherit; padding: 0.4rem 0.8rem; border-radius: 6px; border: 1px solid #999; background: #fff; cursor: pointer; }
-    button:hover { background: #f0f0f0; }
-    button:disabled { opacity: 0.4; cursor: not-allowed; }
-    #reconcile-btn { font-weight: 600; }
+    #domain-switcher { display: flex; gap: 0.4rem; margin: 0.6rem 1rem; }
+    .domain-switch-btn { flex: 1; padding: 0.5rem; border-radius: 8px; border: 1px solid #ccc; background: #f7f7f8; font: inherit; font-size: 0.9rem; }
+    .domain-switch-btn.active { border-color: #333; background: #fff; font-weight: 700; }
 
-    #domains { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-    @media (max-width: 34rem) { #domains { grid-template-columns: 1fr; } }
-    .domain-panel { border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; }
-    .domain-panel h2 { margin: 0 0 0.2rem; font-size: 1.05rem; }
-    .domain-panel .subtitle { color: #777; font-size: 0.78rem; margin-bottom: 0.6rem; }
-    .stat-row { display: flex; justify-content: space-between; padding: 0.2rem 0; font-variant-numeric: tabular-nums; font-size: 0.92rem; border-bottom: 1px solid #eee; }
+    .app-panel { display: none; padding: 0 1rem; }
+    .app-panel.active { display: block; }
+
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 0.8rem; margin-bottom: 0.7rem; background: #fff; }
+    .card h2 { font-size: 0.95rem; margin: 0 0 0.5rem; }
+    .stat-row { display: flex; justify-content: space-between; padding: 0.2rem 0; font-size: 0.9rem; border-bottom: 1px solid #eee; font-variant-numeric: tabular-nums; }
     .stat-row span:first-child { color: #666; }
-    .domain-actions { display: flex; gap: 0.4rem; margin-top: 0.7rem; flex-wrap: wrap; }
-    .domain-actions button { flex: 1; font-size: 0.82rem; padding: 0.4rem 0.3rem; }
-    .rejections { color: #999; font-size: 0.75rem; margin-top: 0.5rem; }
 
-    #log { margin-top: 1.3rem; }
-    #log h2 { font-size: 0.95rem; margin-bottom: 0.3rem; }
-    #log-list { font-family: ui-monospace, monospace; font-size: 0.78rem; color: #555; max-height: 9rem; overflow-y: auto; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.7rem; }
-    #log-list div { padding: 0.1rem 0; }
+    button { font: inherit; padding: 0.45rem 0.7rem; border-radius: 7px; border: 1px solid #999; background: #fff; }
+    button:disabled { opacity: 0.4; }
+    input, select { font: inherit; font-size: 0.85rem; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 6px; width: 100%; box-sizing: border-box; }
 
-    #network-bar { display: flex; align-items: center; gap: 0.5rem; margin: 0.8rem 0; flex-wrap: wrap; font-size: 0.85rem; }
-    #network-warning { color: #a35a00; background: #fff6e5; border: 1px solid #f0d090; border-radius: 6px; padding: 0.5rem 0.7rem; font-size: 0.8rem; margin-bottom: 0.6rem; }
-    #network-warning.mainnet { color: #a30000; background: #fff0f0; border-color: #f0a0a0; font-weight: 600; }
+    .row { display: flex; gap: 0.4rem; margin-bottom: 0.4rem; }
+    .row > * { flex: 1; }
+    .full-btn { width: 100%; margin-top: 0.3rem; font-weight: 600; }
+    .msg { font-size: 0.78rem; margin-top: 0.3rem; min-height: 1em; }
+    .msg.error { color: #b33; }
+    .msg.success { color: #1a8a4a; }
+    .hint { font-size: 0.75rem; color: #888; margin-top: 0.3rem; }
 
-    .identity-block { margin-top: 0.7rem; padding-top: 0.6rem; border-top: 1px dashed var(--border); }
-    .identity-status { font-size: 0.8rem; margin-bottom: 0.4rem; }
-    .identity-status.registered { color: var(--link-up); }
-    .identity-status.unregistered { color: #999; }
-    .identity-row { display: flex; gap: 0.35rem; margin-bottom: 0.35rem; }
-    .identity-row input { flex: 1; font: inherit; font-size: 0.8rem; padding: 0.3rem 0.4rem; border: 1px solid #ccc; border-radius: 5px; min-width: 0; }
-    .identity-row button { font-size: 0.78rem; padding: 0.3rem 0.5rem; }
-    .burn-btn { width: 100%; margin-top: 0.3rem; font-weight: 600; }
-    input[id$="-burn-amount"] { width: 100%; font: inherit; font-size: 0.8rem; padding: 0.3rem 0.4rem; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; margin-top: 0.3rem; }
-    .identity-msg { font-size: 0.75rem; margin-top: 0.3rem; min-height: 1em; }
-    .identity-msg.error { color: #b33; }
-    .identity-msg.success { color: var(--link-up); }
-    .gated-hint { font-size: 0.72rem; color: #b33; margin-top: 0.3rem; }
+    #network-warning { font-size: 0.78rem; padding: 0.5rem 0.6rem; border-radius: 6px; margin-bottom: 0.6rem; background: #fff6e5; border: 1px solid #f0d090; color: #a35a00; }
+    #network-warning.mainnet { background: #fff0f0; border-color: #f0a0a0; color: #a30000; font-weight: 600; }
+
+    #link-status.up { color: #1a8a4a; }
+    #link-status.down { color: #b33; }
+
+    #desktop-icons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin-top: 0.4rem; }
+    .icon-tile { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; font-size: 0.68rem; text-align: center; }
+    .icon-tile .icon-glyph { font-size: 1.6rem; width: 3rem; height: 3rem; display: flex; align-items: center; justify-content: center; background: #f2f2f4; border-radius: 12px; border: 1px solid #e0e0e0; }
+    .icon-tile.unaudited .icon-glyph { border-style: dashed; }
+    .icon-tile.red-listed .icon-glyph { border-color: #c33; opacity: 0.5; }
+    #desktop-empty { color: #999; font-size: 0.82rem; padding: 0.8rem 0; text-align: center; }
+
+    #contacts-list .contact-row { padding: 0.5rem 0; border-bottom: 1px solid #eee; font-size: 0.88rem; display: flex; justify-content: space-between; }
+    #contacts-empty { color: #999; font-size: 0.82rem; padding: 0.8rem 0; text-align: center; }
+
+    #log-list { font-family: ui-monospace, monospace; font-size: 0.74rem; color: #555; max-height: 7rem; overflow-y: auto; background: #f7f7f8; border: 1px solid #ddd; border-radius: 8px; padding: 0.4rem 0.6rem; }
+    #log-list div { padding: 0.08rem 0; }
+
+    #bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; display: flex; background: #fff; border-top: 1px solid #ddd; padding: 0.3rem 0.2rem calc(0.3rem + env(safe-area-inset-bottom)); z-index: 10; }
+    .nav-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.1rem; border: none; background: none; font-size: 0.65rem; color: #888; padding: 0.3rem 0; }
+    .nav-btn .nav-icon { font-size: 1.15rem; }
+    .nav-btn.active { color: #1a1a1a; font-weight: 700; }
   </style>
 </head>
 <body>
   <main id="app">
     <h1>AIWA</h1>
-    <p>Autonomous Interplanetary Web Application</p>
+    <p id="subtitle">Autonomous Interplanetary Web Application</p>
     <p id="status">Initializing…</p>
 
-    <div id="explainer">
-      Two domains, Earth and Mars, each run their <strong>own local ledger</strong>.
-      While the link is down, they accrue value independently — no coordination
-      required, by design (§9 of the whitepaper). Each domain must first
-      <strong>register an identity</strong> by burning real SOL (§24/§26) —
-      an irrecoverable, one-time cost paid before partition, since nothing
-      can be enforced during it. Only then do "Commit" (record a resource
-      claim) and "Claim reward" (post it — reward grows with cadence epochs
-      elapsed <em>between</em> the two, never instantly, §10) become available.
-      Reconciling merges both histories; convergence is deterministic, not negotiated.
+    <div id="domain-switcher">
+      <button data-domain="earth" class="domain-switch-btn active">🌍 Earth</button>
+      <button data-domain="mars" class="domain-switch-btn">🔴 Mars</button>
     </div>
 
-    <div id="network-bar">
-      <span>Solana network:</span>
-      <select id="network-select">
-        <option value="devnet">Devnet (testing — free, no real Sybil resistance)</option>
-        <option value="mainnet-beta">Mainnet (real SOL, irreversible)</option>
-      </select>
-    </div>
-    <div id="network-warning">
-      Devnet mode: burns use free faucet SOL and provide <strong>no real Sybil resistance</strong> (§24). Use this to test the mechanism only.
-    </div>
+    <section id="panel-domain" class="app-panel active">
+      <div class="card">
+        <h2 id="domain-title">Domain</h2>
+        <div class="stat-row"><span>Cadence epoch</span><span id="d-epoch">0</span></div>
+        <div class="stat-row"><span>Balance</span><span id="d-balance">0</span></div>
+        <div class="stat-row"><span>Budget used</span><span id="d-budget">0</span></div>
+        <div class="stat-row"><span>Local events</span><span id="d-events">0</span></div>
+        <div class="stat-row"><span>Identity</span><span id="d-identity">🔒 none</span></div>
+        <button id="advance-btn" class="full-btn">+ Cadence epoch</button>
+      </div>
 
-    <div id="link-bar">
-      <span>Link:</span>
-      <span id="link-status" class="down">🔴 Down (partitioned)</span>
-      <button id="toggle-link-btn">Restore link</button>
-      <button id="reconcile-btn" disabled>🔄 Reconcile</button>
-    </div>
-
-    <div id="domains">
-      <section class="domain-panel" id="panel-earth">
-        <h2>🌍 Earth</h2>
-        <div class="subtitle">domain: earth</div>
-        <div class="stat-row"><span>Cadence epoch</span><span id="earth-epoch">0</span></div>
-        <div class="stat-row"><span>Balance</span><span id="earth-balance">0</span></div>
-        <div class="stat-row"><span>Budget used</span><span id="earth-budget">0 / 1000</span></div>
-        <div class="stat-row"><span>Local events</span><span id="earth-events">0</span></div>
-        <div class="stat-row"><span>Pending commits</span><span id="earth-pending">0</span></div>
-
-        <div class="identity-block">
-          <div class="identity-status unregistered" id="earth-identity-status">🔒 No wallet</div>
-          <div class="identity-row">
-            <input type="password" id="earth-wallet-pw" placeholder="Wallet password" />
-            <button data-domain="earth" class="wallet-create-btn">Create</button>
-            <button data-domain="earth" class="wallet-unlock-btn">Unlock</button>
+      <div class="card">
+        <h2>Desktop — modules (sorted by rank)</h2>
+        <div id="desktop-empty">No modules registered on this domain yet.</div>
+        <div id="desktop-icons"></div>
+        <details style="margin-top:0.6rem">
+          <summary style="font-size:0.82rem;cursor:pointer">＋ Register a module</summary>
+          <div style="margin-top:0.5rem">
+            <div class="row">
+              <input id="mod-id" placeholder="id, e.g. weather.js" />
+              <input id="mod-icon" placeholder="icon" maxlength="4" style="flex:0 0 3.5rem" />
+            </div>
+            <input id="mod-name" placeholder="Display name" style="margin-bottom:0.4rem" />
+            <button id="mod-register-btn" class="full-btn">Register module</button>
+            <p class="hint">Requires a registered identity (see Profile). Rank = reward(burned lamports, cadence epochs) — the real §10 formula.</p>
+            <p class="msg" id="mod-msg"></p>
           </div>
-          <input type="number" id="earth-burn-amount" placeholder="Lamports to burn (any amount)" min="1" step="1" />
-          <button data-domain="earth" class="burn-btn" disabled>🔥 Register identity (burn)</button>
-          <p class="identity-msg" id="earth-identity-msg"></p>
+        </details>
+      </div>
+    </section>
+
+    <section id="panel-commit" class="app-panel">
+      <div class="card">
+        <h2 id="commit-title">Commit — Earth</h2>
+        <div class="stat-row"><span>Pending commits</span><span id="c-pending">0</span></div>
+        <div class="row">
+          <button id="commit-btn" disabled>Commit (b=10)</button>
+          <button id="claim-btn" disabled>Claim reward</button>
         </div>
+        <p class="hint" id="commit-gated-hint">Commit/Claim require identity registration (§24/§26).</p>
+        <p class="hint">"Commit" records a resource claim at the current epoch; "Claim" posts it — reward grows with cadence epochs elapsed between the two, never instantly (§10).</p>
+      </div>
+    </section>
 
-        <div class="domain-actions">
-          <button data-domain="earth" class="advance-btn">+ Cadence epoch</button>
-          <button data-domain="earth" class="commit-btn" disabled>Commit (b=10)</button>
-          <button data-domain="earth" class="claim-btn" disabled>Claim reward</button>
+    <section id="panel-profile" class="app-panel">
+      <div class="card">
+        <h2 id="profile-title">Profile — Earth</h2>
+        <p class="stat-row" id="profile-identity-status">🔒 No wallet</p>
+        <div class="row">
+          <input type="password" id="wallet-pw" placeholder="Wallet password" />
         </div>
-        <p class="gated-hint" id="earth-gated-hint">Commit/Claim require identity registration (§24/§26).</p>
-        <p class="rejections" id="earth-rejections"></p>
-      </section>
-
-      <section class="domain-panel" id="panel-mars">
-        <h2>🔴 Mars</h2>
-        <div class="subtitle">domain: mars</div>
-        <div class="stat-row"><span>Cadence epoch</span><span id="mars-epoch">0</span></div>
-        <div class="stat-row"><span>Balance</span><span id="mars-balance">0</span></div>
-        <div class="stat-row"><span>Budget used</span><span id="mars-budget">0 / 1000</span></div>
-        <div class="stat-row"><span>Local events</span><span id="mars-events">0</span></div>
-        <div class="stat-row"><span>Pending commits</span><span id="mars-pending">0</span></div>
-
-        <div class="identity-block">
-          <div class="identity-status unregistered" id="mars-identity-status">🔒 No wallet</div>
-          <div class="identity-row">
-            <input type="password" id="mars-wallet-pw" placeholder="Wallet password" />
-            <button data-domain="mars" class="wallet-create-btn">Create</button>
-            <button data-domain="mars" class="wallet-unlock-btn">Unlock</button>
-          </div>
-          <input type="number" id="mars-burn-amount" placeholder="Lamports to burn (any amount)" min="1" step="1" />
-          <button data-domain="mars" class="burn-btn" disabled>🔥 Register identity (burn)</button>
-          <p class="identity-msg" id="mars-identity-msg"></p>
+        <div class="row">
+          <button id="wallet-create-btn">Create wallet</button>
+          <button id="wallet-unlock-btn">Unlock wallet</button>
         </div>
+        <input type="number" id="burn-amount" placeholder="Lamports to burn (any amount)" min="1" step="1" style="margin-top:0.5rem" />
+        <button id="burn-btn" class="full-btn" disabled>🔥 Register identity (burn)</button>
+        <p class="msg" id="profile-msg"></p>
+      </div>
+    </section>
 
-        <div class="domain-actions">
-          <button data-domain="mars" class="advance-btn">+ Cadence epoch</button>
-          <button data-domain="mars" class="commit-btn" disabled>Commit (b=10)</button>
-          <button data-domain="mars" class="claim-btn" disabled>Claim reward</button>
+    <section id="panel-contacts" class="app-panel">
+      <div class="card">
+        <h2>Contacts — domains known to <span id="contacts-domain-name">Earth</span></h2>
+        <p class="hint">A domain only appears here once its history has actually merged into this domain's own DAG (§9) — not before, no matter how long the link has been up.</p>
+        <div id="contacts-empty">No other domains known yet.</div>
+        <div id="contacts-list"></div>
+      </div>
+    </section>
+
+    <section id="panel-parameters" class="app-panel">
+      <div class="card">
+        <h2>Solana network</h2>
+        <select id="network-select">
+          <option value="devnet">Devnet (testing — free, no real Sybil resistance)</option>
+          <option value="mainnet-beta">Mainnet (real SOL, irreversible)</option>
+        </select>
+        <div id="network-warning"></div>
+      </div>
+
+      <div class="card">
+        <h2>Reward parameters (θ) — r(b,q) = K·b^α·q^β</h2>
+        <div class="row">
+          <div><label class="hint">K</label><input type="number" id="param-K" step="0.1" /></div>
+          <div><label class="hint">α</label><input type="number" id="param-alpha" step="0.1" /></div>
+          <div><label class="hint">β</label><input type="number" id="param-beta" step="0.1" /></div>
         </div>
-        <p class="gated-hint" id="mars-gated-hint">Commit/Claim require identity registration (§24/§26).</p>
-        <p class="rejections" id="mars-rejections"></p>
-      </section>
-    </div>
+        <p class="hint">Changing these affects reward for every future Claim and module rank computation, for both domains.</p>
+      </div>
 
-    <div id="log">
-      <h2>Event log</h2>
-      <div id="log-list"></div>
-    </div>
+      <div class="card">
+        <h2>Link (interplanetary partition)</h2>
+        <p class="stat-row"><span>Status</span><span id="link-status" class="down">🔴 Down (partitioned)</span></p>
+        <div class="row">
+          <button id="toggle-link-btn">Restore link</button>
+          <button id="reconcile-btn" disabled>🔄 Reconcile</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Event log</h2>
+        <div id="log-list"></div>
+      </div>
+    </section>
   </main>
+
+  <nav id="bottom-nav">
+    <button class="nav-btn active" data-panel="domain"><span class="nav-icon">🖥️</span>Domain</button>
+    <button class="nav-btn" data-panel="commit"><span class="nav-icon">✅</span>Commit</button>
+    <button class="nav-btn" data-panel="profile"><span class="nav-icon">👤</span>Profile</button>
+    <button class="nav-btn" data-panel="contacts"><span class="nav-icon">👥</span>Contacts</button>
+    <button class="nav-btn" data-panel="parameters"><span class="nav-icon">⚙️</span>Parameters</button>
+  </nav>
 
   <script type="module" src="./js/app/main.js"></script>
 </body>
