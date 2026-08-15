@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::economics::cadence::CadenceState;
-use crate::economics::reward::{elapsed_epochs, reward, RewardParams};
+use crate::economics::reward::{domain_age, elapsed_epochs, reward, RewardParams};
 use crate::economics::scarcity::ScarcityState;
 use crate::event::Event;
 
@@ -38,6 +38,8 @@ struct AccrualPayload {
     domain: Option<String>,
     b: Option<f64>,
     q0: Option<i64>,
+    #[serde(rename = "T")]
+    t: Option<f64>,
 }
 
 impl GState {
@@ -61,7 +63,9 @@ impl GState {
     /// Applies one event: delegates to the cadence reducer for
     /// 'cadence' events, computes and (scarcity-clamped) applies reward
     /// for 'accrual' events, and passes through anything else (e.g.
-    /// 'genesis') unchanged.
+    /// 'genesis') unchanged. T (patience rate) defaults to 0 if absent
+    /// from the payload — folded through unchanged and clamped inside
+    /// reward() itself, matching the real formula's own behavior.
     pub fn apply_event(&mut self, theta: &Theta, event: &Event) {
         let kind = event.payload.get("type").and_then(|v| v.as_str());
         let Some(kind) = kind else { return };
@@ -107,8 +111,10 @@ impl GState {
         };
 
         let q = elapsed_epochs(&self.cadence, &domain, q0) as f64;
+        let q_total = domain_age(&self.cadence, &domain) as f64;
+        let patience_rate = payload.t.unwrap_or(0.0);
 
-        let requested = match reward(b, q, theta.reward) {
+        let requested = match reward(b, q, q_total, patience_rate, theta.reward) {
             Ok(r) => r,
             Err(e) => {
                 self.reject_accrual(&event.id, Some(domain), format!("invalid reward inputs: {}", e.0));
@@ -146,12 +152,17 @@ mod tests {
         Event {
             id: id.to_string(),
             parents,
-            payload: serde_json::json!({ "type": "accrual", "domain": domain, "b": b, "q0": q0 }),
+            payload: serde_json::json!({ "type": "accrual", "domain": domain, "b": b, "q0": q0, "T": 0.0 }),
         }
     }
 
+    // r = b * max(1,q) with these params — see reward.rs's test module
+    // header for why (beta=0 nullifies q_total, c=e-1 makes ln(1+c)=1).
     fn theta<'a>(budgets: &'a [(&'a str, Option<f64>)]) -> Theta<'a> {
-        Theta { reward: RewardParams { k: 1.0, alpha: 1.0, beta: 1.0 }, budgets }
+        Theta {
+            reward: RewardParams { alpha: 1.0, beta: 0.0, gamma: 1.0, c: std::f64::consts::E - 1.0, min_q: 1.0 },
+            budgets,
+        }
     }
 
     #[test]
@@ -170,7 +181,6 @@ mod tests {
         let mut state = GState::new(&t);
         state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
         state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
-        // b=10 at q0=0, current epoch=2 -> q=2 -> r = 1*10*2 = 20
         state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0));
         assert_eq!(state.balances.get("d1"), Some(&20.0));
     }
@@ -210,11 +220,27 @@ mod tests {
     }
 
     #[test]
+    fn missing_t_defaults_to_patience_rate_zero() {
+        let budgets = [("d1", None)];
+        let t = theta(&budgets);
+        let mut state = GState::new(&t);
+        state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
+        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
+        let e = Event {
+            id: "a1".to_string(),
+            parents: vec!["c2".to_string()],
+            payload: serde_json::json!({ "type": "accrual", "domain": "d1", "b": 10.0, "q0": 0 }),
+        };
+        state.apply_event(&t, &e);
+        assert_eq!(state.balances.get("d1"), Some(&20.0));
+    }
+
+    #[test]
     fn out_of_causal_order_accrual_sees_the_cadence_state_as_folded_so_far() {
         let budgets = [("d1", None)];
         let t = theta(&budgets);
         let events = vec![
-            accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0), // fed first, out of order
+            accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0),
             cadence_event("c1", vec![], "d1", 1),
             cadence_event("c2", vec!["c1".to_string()], "d1", 2),
         ];
