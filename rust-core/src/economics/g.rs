@@ -74,6 +74,48 @@ impl GState {
             self.cadence.apply_event(event);
             return;
         }
+
+        if kind == "claim-issue" {
+            // Bridges G's fungible balance to Conservation's claims
+            // (§6.1/§7) — mirror of the JS reducer's claim-issue
+            // handling. Only debits the balance here; the actual Claim
+            // record is created by conservation_bridge's independent
+            // fold over the same event.
+            #[derive(Deserialize)]
+            struct ClaimIssuePayload {
+                domain: Option<String>,
+                amount: Option<f64>,
+            }
+            let payload: ClaimIssuePayload = match serde_json::from_value(event.payload.clone()) {
+                Ok(p) => p,
+                Err(_) => {
+                    self.reject_accrual(&event.id, None, "invalid claim-issue payload");
+                    return;
+                }
+            };
+            let domain = match payload.domain {
+                Some(d) if !d.is_empty() => d,
+                _ => {
+                    self.reject_accrual(&event.id, None, "invalid claim-issue payload");
+                    return;
+                }
+            };
+            let amount = match payload.amount {
+                Some(a) if a.is_finite() && a > 0.0 => a,
+                _ => {
+                    self.reject_accrual(&event.id, Some(domain), "invalid claim-issue payload");
+                    return;
+                }
+            };
+            let current_balance = *self.balances.get(&domain).unwrap_or(&0.0);
+            if amount > current_balance {
+                self.reject_accrual(&event.id, Some(domain), format!("insufficient balance: has {current_balance}, tried to issue claim of {amount}"));
+                return;
+            }
+            self.balances.insert(domain, current_balance - amount);
+            return;
+        }
+
         if kind != "accrual" {
             return;
         }
@@ -156,8 +198,6 @@ mod tests {
         }
     }
 
-    // r = b * max(1,q) with these params — see reward.rs's test module
-    // header for why (beta=0 nullifies q_total, c=e-1 makes ln(1+c)=1).
     fn theta<'a>(budgets: &'a [(&'a str, Option<f64>)]) -> Theta<'a> {
         Theta {
             reward: RewardParams { alpha: 1.0, beta: 0.0, gamma: 1.0, c: std::f64::consts::E - 1.0, min_q: 1.0 },
@@ -233,6 +273,41 @@ mod tests {
         };
         state.apply_event(&t, &e);
         assert_eq!(state.balances.get("d1"), Some(&20.0));
+    }
+
+    #[test]
+    fn claim_issue_debits_balance() {
+        let budgets = [("d1", None)];
+        let t = theta(&budgets);
+        let mut state = GState::new(&t);
+        state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
+        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
+        state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0));
+        let e = Event {
+            id: "ci1".to_string(),
+            parents: vec!["a1".to_string()],
+            payload: serde_json::json!({ "type": "claim-issue", "domain": "d1", "id": "claim-1", "amount": 5.0 }),
+        };
+        state.apply_event(&t, &e);
+        assert_eq!(state.balances.get("d1"), Some(&15.0));
+    }
+
+    #[test]
+    fn claim_issue_beyond_balance_is_rejected_not_clamped() {
+        let budgets = [("d1", None)];
+        let t = theta(&budgets);
+        let mut state = GState::new(&t);
+        state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
+        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
+        state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0));
+        let e = Event {
+            id: "ci1".to_string(),
+            parents: vec!["a1".to_string()],
+            payload: serde_json::json!({ "type": "claim-issue", "domain": "d1", "id": "claim-1", "amount": 999.0 }),
+        };
+        state.apply_event(&t, &e);
+        assert_eq!(state.balances.get("d1"), Some(&20.0));
+        assert!(state.accrual_rejections.iter().any(|r| r.event_id == "ci1"));
     }
 
     #[test]
