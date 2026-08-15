@@ -1,28 +1,29 @@
 // main.js — AIWA app entry point. Pure JavaScript, no framework, no
 // build step.
 //
-// Real app structure, per the user's spec: an empty Desktop is the
-// default/home screen (icons of PINNED plugins only); five bottom-nav
-// buttons open overlay screens on top of it — Domain (plugin/theme
-// catalog for the active domain, add/register), Profile (identity +
-// activated-plugin settings), Commit (burn identity cost + submit
-// plugin code), Contacts (known domains, searchable), Parameters
-// (wallets, claim, network, θ, link). Tapping the domain switcher or an
-// already-active nav button returns to the Desktop.
+// N domains, not a fixed two. Earlier revisions hardcoded "Earth" and
+// "Mars" as the only two domains — the user pointed out directly that
+// this doesn't match the real model: there are as many domains as
+// there are users/entities, and who can reconcile with whom at any
+// moment depends on actual reachability, not a fixed global "link"
+// toggle. Fixed here: domains is a Map, created on demand; there is no
+// global link state — Reconcile always targets one specific,
+// user-chosen other domain, matching "I am currently in contact with
+// THIS one," not "the whole system is connected or not."
 //
-// Every screen is a thin rendering pass over already-tested logic —
-// DomainReplica, the wallet/identity flow, materializeG,
-// materializeModuleRegistry, module-rank, module-submission. Desktop
-// "pinning" (which registered plugins actually show as icons) is the
-// one genuinely new, local-only concept here: a personal display
-// preference, not replicated ledger state, stored in localStorage per
-// domain.
+// Also fixed: Solana burn (§24.6(v)) requires reaching Solana's
+// network, which a domain that has never had connectivity to Earth's
+// networks cannot do, ever — the user caught this directly ("impossible
+// qu'on brûle du solana sur Mars"). Local PoW (§24.6(ii), local-pow.js)
+// is wired in as the network-independent alternative: same
+// "this domain has paid c_id" outcome, zero network dependency.
 
 import { createLedger } from '../core/ledger-bridge.js';
 import { materializeG } from '../core/economics/g.js';
 import { loadSolanaWeb3, generateKeypair, keypairFromSecretKey, encryptSecretKey, decryptSecretKey } from '../core/identity/solana-wallet.js';
 import { registerDomainViaBurn } from '../core/identity/identity-flow.js';
 import { initialIdentityCostState, hasIdentityCost } from '../core/identity/identity-cost.js';
+import { minePowProof, registerLocalPow, initialLocalPowState, hasLocalPow } from '../core/identity/local-pow.js';
 import { SOLANA_NETWORKS, DEFAULT_NETWORK } from '../core/identity/solana-networks.js';
 import { materializeModuleRegistry } from '../core/modules/module-registry-reducer.js';
 import { rankFromIdentityAndCadence } from '../core/modules/module-rank.js';
@@ -70,16 +71,6 @@ class DomainReplica {
     return claimed.length;
   }
 
-  async registerModule({ id, name, icon }) {
-    const eventId = await this.dag.addEvent([this.lastEventId], {
-      type: 'module-register', id, name, icon, category: 'Tools', description: '',
-      codeHash: 'demo-no-code-yet', codeUrl: '', author: this.name,
-      isIssuing: false, timeSensitive: null, economicConfig: null, at: this.epoch,
-    });
-    this.lastEventId = eventId;
-    return eventId;
-  }
-
   async foldSubmission(event, isUpdate) {
     const payload = isUpdate
       ? { type: 'module-update', id: event.moduleId, codeHash: event.codeHash, codeUrl: event.codeUrl }
@@ -93,26 +84,28 @@ class DomainReplica {
     return eventId;
   }
 
-  materialize() {
-    return materializeG(theta, this.dag.topoOrder());
+  async init() {
+    this.genesisId = await this.dag.addEvent([], { type: 'genesis', domain: this.name });
+    this.lastEventId = this.genesisId;
   }
-  materializeModules() {
-    return materializeModuleRegistry(this.dag.topoOrder());
-  }
+
+  materialize() { return materializeG(theta, this.dag.topoOrder()); }
+  materializeModules() { return materializeModuleRegistry(this.dag.topoOrder()); }
 }
 
 // ── Global state ────────────────────────────────────────────────────
 
-let theta = { reward: { K: 1, alpha: 1, beta: 1 }, budgets: { earth: 1000, mars: 1000 } };
-let linked = false;
-let earth, mars;
-let activeDomainName = 'earth';
+let theta = { reward: { K: 1, alpha: 1, beta: 1 }, budgets: {} };
+const domains = new Map(); // name -> DomainReplica, created on demand — no fixed count
+let activeDomainName = null;
 let identityState = initialIdentityCostState();
+let powState = initialLocalPowState();
 let submissionState = initialSubmissionState();
 let solanaWeb3 = null;
 
-function activeReplica() { return activeDomainName === 'earth' ? earth : mars; }
+function activeReplica() { return domains.get(activeDomainName); }
 function currentNetwork() { return document.getElementById('network-select').value || DEFAULT_NETWORK; }
+function domainHasIdentity(name) { return hasIdentityCost(identityState, name) || hasLocalPow(powState, name); }
 function log(msg) {
   const line = document.createElement('div');
   line.textContent = `▸ ${msg}`;
@@ -124,15 +117,21 @@ function setMsg(elId, text, kind) {
   el.className = `msg ${kind ?? ''}`;
 }
 
-// ── Desktop pin state (local-only, not replicated — a display
-// preference, not ledger state) ─────────────────────────────────────
+async function createDomain(name) {
+  if (domains.has(name)) throw new Error(`Domain '${name}' already exists.`);
+  const replica = new DomainReplica(name, await createLedger());
+  await replica.init();
+  domains.set(name, replica);
+  theta = { ...theta, budgets: { ...theta.budgets, [name]: 1000 } };
+  return replica;
+}
+
+// ── Desktop pin state (local-only, not replicated) ───────────────────
 
 function pinnedIds(domain) {
   try { return JSON.parse(localStorage.getItem(DESKTOP_PIN_PREFIX + domain) || '[]'); } catch { return []; }
 }
-function setPinned(domain, ids) {
-  localStorage.setItem(DESKTOP_PIN_PREFIX + domain, JSON.stringify(ids));
-}
+function setPinned(domain, ids) { localStorage.setItem(DESKTOP_PIN_PREFIX + domain, JSON.stringify(ids)); }
 function togglePin(domain, id) {
   const ids = pinnedIds(domain);
   const idx = ids.indexOf(id);
@@ -140,7 +139,7 @@ function togglePin(domain, id) {
   setPinned(domain, ids);
 }
 
-// ── Wallet / identity (unchanged logic) ──────────────────────────────
+// ── Wallet / identity ─────────────────────────────────────────────
 
 function walletStorageKey(domain) { return `${WALLET_STORAGE_PREFIX}${domain}`; }
 async function ensureSolanaWeb3() {
@@ -162,7 +161,7 @@ async function unlockWallet(replica, password) {
   const secretKey = await decryptSecretKey(record, password);
   replica.keypair = keypairFromSecretKey(web3, secretKey);
 }
-async function registerIdentity(replica) {
+async function registerIdentityViaBurn(replica) {
   const network = currentNetwork();
   const config = SOLANA_NETWORKS[network];
   const lamports = parseInt(document.getElementById('burn-amount').value, 10);
@@ -183,9 +182,27 @@ async function registerIdentity(replica) {
     const result = await registerDomainViaBurn(web3, replica.keypair, identityState, { domain: replica.name, lamports, network });
     identityState = result.state;
     setMsg('burn-msg', `✅ Registered — tx ${result.signature.slice(0, 12)}…`, 'success');
-    log(`[${replica.name}] identity registered via burn — tx ${result.signature}`);
+    log(`[${replica.name}] identity registered via SOL burn — tx ${result.signature}`);
   } catch (err) {
     setMsg('burn-msg', `❌ ${err.message}`, 'error');
+  }
+  renderAll();
+}
+async function registerIdentityViaPow(replica) {
+  const difficulty = parseInt(document.getElementById('pow-difficulty').value, 10) || 16;
+  setMsg('pow-msg', `Mining locally at difficulty ${difficulty}… (no network involved)`);
+  try {
+    const proof = await minePowProof(replica.name, difficulty);
+    const result = await registerLocalPow(powState, proof);
+    if (!result.accepted) {
+      setMsg('pow-msg', `❌ ${result.reason}`, 'error');
+      return;
+    }
+    powState = result.state;
+    setMsg('pow-msg', `✅ Registered — nonce ${proof.nonce}, hash ${proof.hash.slice(0, 12)}…`, 'success');
+    log(`[${replica.name}] identity registered via local PoW — nonce ${proof.nonce}, difficulty ${difficulty}`);
+  } catch (err) {
+    setMsg('pow-msg', `❌ ${err.message}`, 'error');
   }
   renderAll();
 }
@@ -208,14 +225,23 @@ function showDesktop() {
 // ── Renderers ─────────────────────────────────────────────────────
 
 function renderDomainSwitcher() {
-  document.querySelectorAll('.domain-switch-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.domain === activeDomainName));
+  const pillsEl = document.getElementById('domain-pills');
+  pillsEl.innerHTML = '';
+  for (const name of domains.keys()) {
+    const btn = document.createElement('button');
+    btn.className = 'domain-switch-btn' + (name === activeDomainName ? ' active' : '');
+    btn.textContent = name;
+    btn.addEventListener('click', () => { activeDomainName = name; showDesktop(); renderAll(); });
+    pillsEl.appendChild(btn);
+  }
 }
 
 function renderDesktop() {
   const replica = activeReplica();
+  if (!replica) return;
   const gState = replica.materialize();
   const domain = replica.name;
-  document.getElementById('desktop-title').textContent = `Desktop — ${domain === 'earth' ? 'Earth' : 'Mars'}`;
+  document.getElementById('desktop-title').textContent = `Desktop — ${domain}`;
   document.getElementById('d-epoch').textContent = gState.cadence.domains[domain]?.epoch ?? 0;
   document.getElementById('d-balance').textContent = gState.balances[domain] ?? 0;
 
@@ -241,6 +267,7 @@ function renderDesktop() {
 
 function renderDomainScreen() {
   const replica = activeReplica();
+  if (!replica) return;
   const gState = replica.materialize();
   const registry = replica.materializeModules();
   const pinned = new Set(pinnedIds(replica.name));
@@ -263,20 +290,19 @@ function renderDomainScreen() {
     row.className = 'catalog-row';
     const isPinned = pinned.has(m.id);
     row.innerHTML = `<div class="catalog-icon">${m.icon || '⬡'}</div><div class="catalog-info"><div class="catalog-name">${m.name}</div><div class="catalog-meta">rank ${m.rank.toFixed(2)} · ${m.auditStatus}</div></div><button data-id="${m.id}">${isPinned ? '− Remove' : '+ Add'}</button>`;
-    row.querySelector('button').addEventListener('click', () => {
-      togglePin(replica.name, m.id);
-      renderAll();
-    });
+    row.querySelector('button').addEventListener('click', () => { togglePin(replica.name, m.id); renderAll(); });
     listEl.appendChild(row);
   }
 }
 
 function renderProfileScreen() {
   const replica = activeReplica();
-  const registered = hasIdentityCost(identityState, replica.name);
-  document.getElementById('profile-title').textContent = `Profile — ${replica.name === 'earth' ? 'Earth' : 'Mars'}`;
+  if (!replica) return;
+  const registered = domainHasIdentity(replica.name);
+  const via = hasIdentityCost(identityState, replica.name) ? 'SOL burn' : hasLocalPow(powState, replica.name) ? 'local PoW' : null;
+  document.getElementById('profile-title').textContent = `Profile — ${replica.name}`;
   document.getElementById('profile-identity-status').textContent = registered
-    ? `✅ burned ${identityState.registered[replica.name].burnedLamports} lamports`
+    ? `✅ registered via ${via}`
     : replica.keypair ? '🔓 wallet ready, not registered' : '🔒 no identity';
   document.getElementById('profile-network').textContent = currentNetwork();
 
@@ -291,21 +317,23 @@ function renderProfileScreen() {
     return;
   }
   emptyEl.style.display = 'none';
-  listEl.innerHTML = active
-    .map((m) => `<div class="stat-row"><span>${m.icon || '⬡'} ${m.name} (${currentNetwork()})</span><span>${m.auditStatus}</span></div>`)
-    .join('');
+  listEl.innerHTML = active.map((m) => `<div class="stat-row"><span>${m.icon || '⬡'} ${m.name} (${currentNetwork()})</span><span>${m.auditStatus}</span></div>`).join('');
 }
 
 function renderCommitScreen() {
   const replica = activeReplica();
-  document.getElementById('commit-burn-title').textContent = `🔥 Burn — ${replica.name === 'earth' ? 'Earth' : 'Mars'}`;
-  document.getElementById('burn-btn').disabled = !replica.keypair || hasIdentityCost(identityState, replica.name);
+  if (!replica) return;
+  document.getElementById('commit-burn-title').textContent = `🔥 Burn — ${replica.name}`;
+  document.getElementById('pow-title').textContent = `⛏️ Mine locally — ${replica.name}`;
+  document.getElementById('burn-btn').disabled = !replica.keypair || domainHasIdentity(replica.name);
+  document.getElementById('pow-btn').disabled = domainHasIdentity(replica.name);
 }
 
 function renderContactsScreen() {
   const replica = activeReplica();
+  if (!replica) return;
   const state = replica.materialize();
-  document.getElementById('contacts-domain-name').textContent = replica.name === 'earth' ? 'Earth' : 'Mars';
+  document.getElementById('contacts-domain-name').textContent = replica.name;
   const query = (document.getElementById('contacts-search').value || '').toLowerCase();
   const others = Object.keys(state.cadence.domains).filter((d) => d !== replica.name && d.toLowerCase().includes(query));
   const listEl = document.getElementById('contacts-list');
@@ -316,9 +344,7 @@ function renderContactsScreen() {
     return;
   }
   emptyEl.style.display = 'none';
-  listEl.innerHTML = others
-    .map((d) => `<div class="contact-row"><span>${d === 'earth' ? '🌍' : '🔴'} ${d}</span><span>epoch ${state.cadence.domains[d].epoch}</span></div>`)
-    .join('');
+  listEl.innerHTML = others.map((d) => `<div class="contact-row"><span>${d}</span><span>epoch ${state.cadence.domains[d].epoch}</span></div>`).join('');
 }
 
 function renderParametersScreen() {
@@ -334,17 +360,27 @@ function renderParametersScreen() {
   document.getElementById('param-alpha').value = theta.reward.alpha;
   document.getElementById('param-beta').value = theta.reward.beta;
 
-  document.getElementById('link-status').textContent = linked ? '🟢 Up' : '🔴 Down (partitioned)';
-  document.getElementById('link-status').className = linked ? 'up' : 'down';
-  document.getElementById('toggle-link-btn').textContent = linked ? 'Cut link' : 'Restore link';
-  document.getElementById('reconcile-btn').disabled = !linked;
-
   const replica = activeReplica();
-  const registered = hasIdentityCost(identityState, replica.name);
-  document.getElementById('c-pending').textContent = replica.pending.length;
-  document.getElementById('commit-action-btn').disabled = !registered;
-  document.getElementById('claim-btn').disabled = !registered;
-  document.getElementById('claim-gated-hint').style.display = registered ? 'none' : 'block';
+  if (replica) {
+    const registered = domainHasIdentity(replica.name);
+    document.getElementById('c-pending').textContent = replica.pending.length;
+    document.getElementById('commit-action-btn').disabled = !registered;
+    document.getElementById('claim-btn').disabled = !registered;
+    document.getElementById('claim-gated-hint').style.display = registered ? 'none' : 'block';
+  }
+
+  const targetSelect = document.getElementById('reconcile-target');
+  const currentTarget = targetSelect.value;
+  targetSelect.innerHTML = '';
+  const others = [...domains.keys()].filter((d) => d !== activeDomainName);
+  for (const d of others) {
+    const opt = document.createElement('option');
+    opt.value = d;
+    opt.textContent = d;
+    targetSelect.appendChild(opt);
+  }
+  if (others.includes(currentTarget)) targetSelect.value = currentTarget;
+  document.getElementById('reconcile-btn').disabled = others.length === 0;
 }
 
 function renderAll() {
@@ -357,17 +393,18 @@ function renderAll() {
   renderParametersScreen();
 }
 
-// ── Reconcile ───────────────────────────────────────────────────────
+// ── Reconcile: always a specific pair, never a global toggle ─────────
 
-async function reconcile() {
-  earth.dag.merge(mars.dag);
-  mars.dag.merge(earth.dag);
-  const marsBalanceFromEarth = earth.materialize().balances.mars ?? 0;
-  const marsBalanceFromMars = mars.materialize().balances.mars ?? 0;
-  const earthBalanceFromMars = mars.materialize().balances.earth ?? 0;
-  const earthBalanceFromEarth = earth.materialize().balances.earth ?? 0;
-  const converged = marsBalanceFromEarth === marsBalanceFromMars && earthBalanceFromMars === earthBalanceFromEarth;
-  log(`Reconciled (${earth.dag.size} events on both sides now).`);
+async function reconcile(withName) {
+  const a = activeReplica();
+  const b = domains.get(withName);
+  if (!a || !b) return;
+  a.dag.merge(b.dag);
+  b.dag.merge(a.dag);
+  const aFromA = a.materialize().balances[a.name] ?? 0;
+  const aFromB = b.materialize().balances[a.name] ?? 0;
+  const converged = aFromA === aFromB;
+  log(`[${a.name}] reconciled with [${b.name}] (${a.dag.size} events on both sides now).`);
   log(converged ? 'Convergence check passed: both replicas agree (§9).' : 'Convergence check FAILED — bug.');
   renderAll();
 }
@@ -407,15 +444,23 @@ async function submitPluginCode(replica) {
 // ── Boot ──────────────────────────────────────────────────────────
 
 async function main() {
-  earth = new DomainReplica('earth', await createLedger());
-  const genesisId = await earth.dag.addEvent([], { type: 'genesis' });
-  earth.genesisId = genesisId;
-  earth.lastEventId = genesisId;
+  await createDomain('earth');
+  await createDomain('mars');
+  activeDomainName = 'earth';
 
-  mars = new DomainReplica('mars', await createLedger());
-  const marsGenesisId = await mars.dag.addEvent([], { type: 'genesis' });
-  mars.genesisId = marsGenesisId;
-  mars.lastEventId = marsGenesisId;
+  document.getElementById('add-domain-btn').addEventListener('click', async () => {
+    const name = prompt('New domain name (e.g. an outpost, a person, anything — no relation to any other domain implied):');
+    if (!name) return;
+    try {
+      await createDomain(name.trim());
+      activeDomainName = name.trim();
+      log(`Domain '${name.trim()}' created.`);
+      showDesktop();
+      renderAll();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 
   document.querySelectorAll('.nav-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -424,40 +469,25 @@ async function main() {
     });
   });
 
-  document.querySelectorAll('.domain-switch-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      activeDomainName = btn.dataset.domain;
-      showDesktop();
-      renderAll();
-    });
-  });
-
-  document.getElementById('mod-register-btn').addEventListener('click', async () => {
-    const replica = activeReplica();
-    if (!hasIdentityCost(identityState, replica.name)) return setMsg('mod-msg', 'Register an identity first (Commit tab).', 'error');
-    const id = document.getElementById('mod-id').value.trim();
-    const icon = document.getElementById('mod-icon').value.trim() || '⬡';
-    const name = document.getElementById('mod-name').value.trim() || id;
-    if (!id) return setMsg('mod-msg', 'Enter a module id.', 'error');
-    await replica.registerModule({ id, name, icon });
-    setMsg('mod-msg', `✅ Registered '${id}'.`, 'success');
-    log(`[${replica.name}] module '${id}' registered`);
-    renderAll();
-  });
-
-  document.getElementById('burn-btn').addEventListener('click', () => registerIdentity(activeReplica()));
+  document.getElementById('burn-btn').addEventListener('click', () => registerIdentityViaBurn(activeReplica()));
+  document.getElementById('pow-btn').addEventListener('click', () => registerIdentityViaPow(activeReplica()));
   document.getElementById('submit-btn').addEventListener('click', () => submitPluginCode(activeReplica()));
 
   document.getElementById('commit-action-btn').addEventListener('click', () => {
     const replica = activeReplica();
     replica.commit(10);
-    log(`[${replica.name}] committed b=10 at q0=${replica.epoch}`);
+    log(`[${replica.name}] staked claim b=10 at q0=${replica.epoch}`);
     renderAll();
   });
   document.getElementById('claim-btn').addEventListener('click', async () => {
     const replica = activeReplica();
     const n = await replica.claim();
     log(n > 0 ? `[${replica.name}] claimed ${n} commitment(s).` : `[${replica.name}] nothing to claim.`);
+    renderAll();
+  });
+  document.getElementById('advance-btn')?.addEventListener('click', async () => {
+    const replica = activeReplica();
+    await replica.advanceCadence();
     renderAll();
   });
 
@@ -500,15 +530,13 @@ async function main() {
     });
   });
 
-  document.getElementById('toggle-link-btn').addEventListener('click', () => {
-    linked = !linked;
-    log(linked ? 'Link restored.' : 'Link cut — domains now partitioned.');
-    renderAll();
+  document.getElementById('reconcile-btn').addEventListener('click', () => {
+    const target = document.getElementById('reconcile-target').value;
+    if (target) reconcile(target);
   });
-  document.getElementById('reconcile-btn').addEventListener('click', () => { if (linked) reconcile(); });
 
   renderAll();
-  document.getElementById('status').textContent = 'Ready — two independent domains, partitioned by default.';
+  document.getElementById('status').textContent = 'Ready — N independent domains, reconciled pairwise, never globally.';
 }
 
 main().catch((err) => {
