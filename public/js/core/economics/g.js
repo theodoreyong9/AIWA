@@ -76,8 +76,32 @@ export function applyGEvent(theta, state, event) {
     return { ...state, cadence: applyCadenceEvent(state.cadence, event) };
   }
 
+  if (payload.type === 'claim-issue') {
+    // Bridges G's fungible balance to Conservation's claims (§6.1/§7):
+    // converts part of a domain's accrued balance into a spendable,
+    // uniquely-identified claim. This reducer only debits the balance —
+    // creating the actual Claim record is conservation.js's
+    // issueClaim(), applied separately by whoever folds both views over
+    // the same event (see conservation-bridge.js). Insufficient balance
+    // is rejected exactly like a malformed accrual, not silently
+    // clamped — spending more than you have is a real error, not a
+    // scarcity policy to apply.
+    const { domain, amount } = payload;
+    if (typeof domain !== 'string' || domain.length === 0 || !Number.isFinite(amount) || amount <= 0) {
+      return { ...state, accrualRejections: [...state.accrualRejections, { eventId: event.id, domain: domain ?? null, reason: 'invalid claim-issue payload' }] };
+    }
+    const currentBalance = state.balances[domain] ?? 0;
+    if (amount > currentBalance) {
+      return {
+        ...state,
+        accrualRejections: [...state.accrualRejections, { eventId: event.id, domain, reason: `insufficient balance: has ${currentBalance}, tried to issue claim of ${amount}` }],
+      };
+    }
+    return { ...state, balances: { ...state.balances, [domain]: currentBalance - amount } };
+  }
+
   if (payload.type !== 'accrual') {
-    return state; // e.g. 'genesis' — not this reducer's concern
+    return state; // e.g. 'genesis', 'transfer' — not this reducer's concern
   }
 
   const { domain, b, q0, T } = payload;
