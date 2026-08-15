@@ -16,9 +16,8 @@ pub use economics::{
 };
 pub use event::Event;
 pub use identity::{
-    mine_pow_proof, verify_burn_proof, verify_pow_proof, Commitment, IdentityCostState,
-    LocalPowState, NormalizedBurnTx, PowProof, RegisterResult, RegisteredIdentity, VerifyResult,
-    SOLANA_INCINERATOR_ADDRESS,
+    verify_burn_proof, Commitment, IdentityCostState, NormalizedBurnTx, RegisterResult,
+    RegisteredIdentity, VerifyResult, SOLANA_INCINERATOR_ADDRESS,
 };
 pub use modules::{
     apply_module_event, build_submission_event, check_submission_eligibility,
