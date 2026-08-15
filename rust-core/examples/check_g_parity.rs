@@ -53,7 +53,7 @@ fn main() {
     }
 
     let budgets = [("d1", Some(100.0)), ("d2", None)];
-    let theta = Theta { reward: RewardParams { k: 1.0, alpha: 1.0, beta: 1.0 }, budgets: &budgets };
+    let theta = Theta { reward: RewardParams { alpha: 1.0, beta: 0.0, gamma: 1.0, c: std::f64::consts::E - 1.0, min_q: 1.0 }, budgets: &budgets };
 
     let ordered = dag.topo_order();
     let state = GState::materialize(&theta, &ordered);
