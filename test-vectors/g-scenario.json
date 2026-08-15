@@ -1,22 +1,12 @@
-// check-id-parity.mjs — computes the content-addressed id for each case
-// in test-vectors/id-parity.json using the pure JS EventDag, one id per
-// line. Meant to be diffed against the Rust output of the same fixture
-// (rust-core/examples/check_id_parity.rs) — see scripts/verify-parity.sh.
-//
-// Run: node scripts/check-id-parity.mjs
-
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { EventDag } from '../public/js/core/event-dag.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const fixturePath = join(__dirname, '..', 'test-vectors', 'id-parity.json');
-const cases = JSON.parse(readFileSync(fixturePath, 'utf8'));
-
-const dag = new EventDag();
-
-for (const testCase of cases) {
-  const id = await dag.computeId(testCase.parents, testCase.payload);
-  console.log(id);
-}
+[
+  { "label": "genesis", "parents": [], "payload": { "type": "genesis" } },
+  { "label": "c1", "parents": ["genesis"], "payload": { "type": "cadence", "domain": "d1", "epoch": 1 } },
+  { "label": "c2", "parents": ["c1"], "payload": { "type": "cadence", "domain": "d1", "epoch": 2 } },
+  { "label": "a1", "parents": ["c2"], "payload": { "type": "accrual", "domain": "d1", "b": 10, "q0": 0 } },
+  { "label": "c1b", "parents": ["genesis"], "payload": { "type": "cadence", "domain": "d2", "epoch": 1 } },
+  { "label": "a2", "parents": ["c1b"], "payload": { "type": "accrual", "domain": "d2", "b": 20, "q0": 0 } },
+  { "label": "c3", "parents": ["c2"], "payload": { "type": "cadence", "domain": "d1", "epoch": 3 } },
+  { "label": "a3", "parents": ["c3"], "payload": { "type": "accrual", "domain": "d1", "b": 5, "q0": 1 } },
+  { "label": "a4-invalid", "parents": ["c3"], "payload": { "type": "accrual", "domain": "d1", "b": -1, "q0": 0 } },
+  { "label": "c4-skip", "parents": ["c3"], "payload": { "type": "cadence", "domain": "d1", "epoch": 5 } }
+]
