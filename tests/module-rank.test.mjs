@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeModuleRank, checkSubmissionEligibility } from '../public/js/core/modules/module-rank.js';
+import { computeModuleRank, checkSubmissionEligibility, rankFromIdentityAndCadence } from '../public/js/core/modules/module-rank.js';
 
 const theta = { K: 1, alpha: 1, beta: 1 };
 
@@ -47,4 +47,17 @@ test('rank sorts higher for the same burn aged longer', () => {
   const youngRank = computeModuleRank(1000, 2, theta);
   const agedRank = computeModuleRank(1000, 20, theta);
   assert.ok(agedRank > youngRank);
+});
+
+test('rankFromIdentityAndCadence returns 0 for a domain with no registered identity cost', () => {
+  const identityCostState = { registered: {}, usedSignatures: {} };
+  const cadenceState = { domains: {}, rejections: [] };
+  assert.equal(rankFromIdentityAndCadence(identityCostState, cadenceState, 'earth', theta), 0);
+});
+
+test('rankFromIdentityAndCadence combines a domain\'s real burn and current epoch', () => {
+  const identityCostState = { registered: { earth: { domain: 'earth', signature: 'sig1', burnedLamports: 500, registeredAt: 0 } }, usedSignatures: {} };
+  const cadenceState = { domains: { earth: { epoch: 4, lastId: 'x' } }, rejections: [] };
+  // Same as computeModuleRank(500, 4, theta) = 500 * 4 = 2000
+  assert.equal(rankFromIdentityAndCadence(identityCostState, cadenceState, 'earth', theta), 2000);
 });
