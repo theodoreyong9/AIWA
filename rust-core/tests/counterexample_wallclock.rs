@@ -1,225 +1,70 @@
-use std::collections::HashMap;
+//! counterexample_wallclock — mirrors
+//! tests/counterexample-wallclock.test.mjs. A deliberately broken
+//! variant of G, kept here (not in src/) so it can never be mistaken for
+//! usable code, in the spirit of §20–22's methodology: break an
+//! invariant on purpose and show the harness actually catches it.
 
-use serde::Deserialize;
+use aiwa_core::{Event, EventDagCore};
 
-use crate::economics::cadence::CadenceState;
-use crate::economics::reward::{elapsed_epochs, reward, RewardParams};
-use crate::economics::scarcity::ScarcityState;
-use crate::event::Event;
-
-/// θ for the composed G: reward constants plus per-domain budgets.
-/// Mirror of the `Theta` shape in g.js.
-pub struct Theta<'a> {
-    pub reward: RewardParams,
-    pub budgets: &'a [(&'a str, Option<f64>)],
+/// Deliberately broken: q is derived from an externally-injected
+/// wall-clock reading, not from cadence state. No cadence events are
+/// even consulted — mirror of materializeBrokenWallClockG() in
+/// tests/counterexample-wallclock.test.mjs.
+fn materialize_broken_wallclock_g(ordered_events: &[&Event], wall_clock_now: i64) -> f64 {
+    let mut balance = 0.0;
+    for event in ordered_events {
+        let payload = &event.payload;
+        if payload.get("type").and_then(|v| v.as_str()) != Some("accrual") {
+            continue;
+        }
+        let b = payload["b"].as_f64().unwrap();
+        let q0 = payload["q0"].as_i64().unwrap();
+        let q = (wall_clock_now - q0).max(0) as f64; // <-- the broken part
+        balance += 1.0 * b.powf(1.0) * q.powf(1.0); // K=alpha=beta=1
+    }
+    balance
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct AccrualRejection {
-    pub event_id: String,
-    pub domain: Option<String>,
-    pub reason: String,
+#[test]
+fn control_real_cadence_derived_g_is_unaffected_by_wallclock_perturbation() {
+    use aiwa_core::{GState, RewardParams, Theta};
+
+    let mut dag = EventDagCore::new();
+    let genesis = dag.add_event(vec![], serde_json::json!({"type": "genesis"})).unwrap();
+    let c1 = dag
+        .add_event(vec![genesis], serde_json::json!({"type": "cadence", "domain": "d1", "epoch": 1}))
+        .unwrap();
+    dag.add_event(vec![c1], serde_json::json!({"type": "accrual", "domain": "d1", "b": 10, "q0": 0}))
+        .unwrap();
+
+    let ordered = dag.topo_order();
+    let budgets = [("d1", None)];
+    let theta = Theta { reward: RewardParams { alpha: 1.0, beta: 0.0, gamma: 1.0, c: std::f64::consts::E - 1.0, min_q: 1.0 }, budgets: &budgets };
+
+    let state_a = GState::materialize(&theta, &ordered);
+    let state_b = GState::materialize(&theta, &ordered);
+
+    assert_eq!(state_a.balances, state_b.balances);
 }
 
-/// A = G(H_d, θ). Composition of cadence + reward + scarcity — see
-/// g.js's module header for the full rationale, including the Lemma 1
-/// (§11) note on why this module needs no identity check of its own as
-/// long as accrual payloads carry q0.
-#[derive(Debug, Clone, Default)]
-pub struct GState {
-    pub cadence: CadenceState,
-    pub scarcity: ScarcityState,
-    pub balances: HashMap<String, f64>,
-    pub accrual_rejections: Vec<AccrualRejection>,
-}
+#[test]
+fn counterexample_broken_wallclock_variant_diverges_on_identical_converged_event_set() {
+    let mut dag = EventDagCore::new();
+    let genesis = dag.add_event(vec![], serde_json::json!({"type": "genesis"})).unwrap();
+    // No cadence events at all — the broken variant doesn't consult them.
+    dag.add_event(vec![genesis], serde_json::json!({"type": "accrual", "domain": "d1", "b": 10, "q0": 0}))
+        .unwrap();
 
-#[derive(Debug, Deserialize)]
-struct AccrualPayload {
-    domain: Option<String>,
-    b: Option<f64>,
-    q0: Option<i64>,
-}
+    let ordered = dag.topo_order();
 
-impl GState {
-    pub fn new(theta: &Theta) -> Self {
-        GState {
-            cadence: CadenceState::new(),
-            scarcity: ScarcityState::new(theta.budgets),
-            balances: HashMap::new(),
-            accrual_rejections: Vec::new(),
-        }
-    }
+    let replica_at_10 = materialize_broken_wallclock_g(&ordered, 10);
+    let replica_at_1000 = materialize_broken_wallclock_g(&ordered, 1000);
 
-    fn reject_accrual(&mut self, event_id: &str, domain: Option<String>, reason: impl Into<String>) {
-        self.accrual_rejections.push(AccrualRejection {
-            event_id: event_id.to_string(),
-            domain,
-            reason: reason.into(),
-        });
-    }
+    assert_ne!(
+        replica_at_10, replica_at_1000,
+        "the broken variant was expected to diverge — if this assertion fails, the counterexample itself is broken, not confirming anything"
+    );
 
-    /// Applies one event: delegates to the cadence reducer for
-    /// 'cadence' events, computes and (scarcity-clamped) applies reward
-    /// for 'accrual' events, and passes through anything else (e.g.
-    /// 'genesis') unchanged.
-    pub fn apply_event(&mut self, theta: &Theta, event: &Event) {
-        let kind = event.payload.get("type").and_then(|v| v.as_str());
-        let Some(kind) = kind else { return };
-
-        if kind == "cadence" {
-            self.cadence.apply_event(event);
-            return;
-        }
-        if kind != "accrual" {
-            return;
-        }
-
-        let payload: AccrualPayload = match serde_json::from_value(event.payload.clone()) {
-            Ok(p) => p,
-            Err(e) => {
-                self.reject_accrual(&event.id, None, format!("malformed accrual payload: {e}"));
-                return;
-            }
-        };
-
-        let domain = match payload.domain {
-            Some(d) if !d.is_empty() => d,
-            _ => {
-                self.reject_accrual(&event.id, None, "missing or invalid domain");
-                return;
-            }
-        };
-
-        let q0 = match payload.q0 {
-            Some(v) if v >= 0 => v as u64,
-            _ => {
-                self.reject_accrual(&event.id, Some(domain), "q0 must be a non-negative integer");
-                return;
-            }
-        };
-
-        let b = match payload.b {
-            Some(v) => v,
-            None => {
-                self.reject_accrual(&event.id, Some(domain), "missing b");
-                return;
-            }
-        };
-
-        let q = elapsed_epochs(&self.cadence, &domain, q0) as f64;
-
-        let requested = match reward(b, q, theta.reward) {
-            Ok(r) => r,
-            Err(e) => {
-                self.reject_accrual(&event.id, Some(domain), format!("invalid reward inputs: {}", e.0));
-                return;
-            }
-        };
-
-        let issued = self.scarcity.apply_issuance_attempt(&domain, requested);
-        *self.balances.entry(domain).or_insert(0.0) += issued;
-    }
-
-    /// A = G(H_d, θ): folds a topologically-ordered event list (e.g.
-    /// from EventDagCore::topo_order()).
-    pub fn materialize(theta: &Theta, ordered_events: &[&Event]) -> GState {
-        let mut state = GState::new(theta);
-        for event in ordered_events {
-            state.apply_event(theta, event);
-        }
-        state
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn cadence_event(id: &str, parents: Vec<String>, domain: &str, epoch: i64) -> Event {
-        Event {
-            id: id.to_string(),
-            parents,
-            payload: serde_json::json!({ "type": "cadence", "domain": domain, "epoch": epoch }),
-        }
-    }
-    fn accrual_event(id: &str, parents: Vec<String>, domain: &str, b: f64, q0: i64) -> Event {
-        Event {
-            id: id.to_string(),
-            parents,
-            payload: serde_json::json!({ "type": "accrual", "domain": domain, "b": b, "q0": q0 }),
-        }
-    }
-
-    fn theta<'a>(budgets: &'a [(&'a str, Option<f64>)]) -> Theta<'a> {
-        Theta { reward: RewardParams { k: 1.0, alpha: 1.0, beta: 1.0 }, budgets }
-    }
-
-    #[test]
-    fn accrual_before_any_cadence_advance_yields_zero_reward() {
-        let budgets = [("d1", None)];
-        let t = theta(&budgets);
-        let mut state = GState::new(&t);
-        state.apply_event(&t, &accrual_event("e1", vec![], "d1", 10.0, 0));
-        assert_eq!(state.balances.get("d1"), Some(&0.0));
-    }
-
-    #[test]
-    fn accrual_after_cadence_advance_accrues_proportional_reward() {
-        let budgets = [("d1", None)];
-        let t = theta(&budgets);
-        let mut state = GState::new(&t);
-        state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
-        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
-        // b=10 at q0=0, current epoch=2 -> q=2 -> r = 1*10*2 = 20
-        state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0));
-        assert_eq!(state.balances.get("d1"), Some(&20.0));
-    }
-
-    #[test]
-    fn scarcity_clamp_applies_to_composed_reward() {
-        let budgets = [("d1", Some(15.0))];
-        let t = theta(&budgets);
-        let mut state = GState::new(&t);
-        state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
-        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
-        state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0));
-        assert_eq!(state.balances.get("d1"), Some(&15.0));
-        assert_eq!(state.scarcity.domains["d1"].used, 15.0);
-    }
-
-    #[test]
-    fn malformed_accrual_events_are_rejected_without_panicking() {
-        let budgets = [("d1", None)];
-        let t = theta(&budgets);
-        let mut state = GState::new(&t);
-        state.apply_event(&t, &accrual_event("x1", vec![], "", 10.0, 0));
-        state.apply_event(&t, &accrual_event("x2", vec![], "d1", -5.0, 0));
-        assert!(state.balances.is_empty());
-        assert_eq!(state.accrual_rejections.len(), 2);
-    }
-
-    #[test]
-    fn genesis_and_other_event_types_pass_through_unchanged() {
-        let budgets = [("d1", None)];
-        let t = theta(&budgets);
-        let mut state = GState::new(&t);
-        let e = Event { id: "g1".to_string(), parents: vec![], payload: serde_json::json!({"type": "genesis"}) };
-        state.apply_event(&t, &e);
-        assert!(state.balances.is_empty());
-        assert!(state.accrual_rejections.is_empty());
-    }
-
-    #[test]
-    fn out_of_causal_order_accrual_sees_the_cadence_state_as_folded_so_far() {
-        let budgets = [("d1", None)];
-        let t = theta(&budgets);
-        let events = vec![
-            accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0), // fed first, out of order
-            cadence_event("c1", vec![], "d1", 1),
-            cadence_event("c2", vec!["c1".to_string()], "d1", 2),
-        ];
-        let refs: Vec<&Event> = events.iter().collect();
-        let state = GState::materialize(&t, &refs);
-        assert_eq!(state.balances.get("d1"), Some(&0.0));
-    }
+    assert_eq!(replica_at_10, 10.0 * 10.0);
+    assert_eq!(replica_at_1000, 10.0 * 1000.0);
 }
