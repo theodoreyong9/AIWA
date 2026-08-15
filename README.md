@@ -672,7 +672,7 @@ previous update to this README.)
 - [x] Conservation (§6.1/§7) Phases 1–3: claim state machine, consume guard, transmutation (burn→mint) — JS + Rust, 18 tests total
 - [x] Conservation Phases 4–5: deliberate non-atomic-consume counterexample (Appendix H.9.1), cross-language parity (Appendix H.9.2) — 7 new tests
 - [x] **Conservation plan complete** — all 5 phases done; §7's pre-existing "Appendix B.7" mis-citation fixed in the whitepaper
-- [ ] Wire Conservation to economics: claims aren't yet created from an accrual event's issued balance
+- [x] Wire Conservation to economics: `claim-issue`/`transfer` DAG events bridge G's balance to conservation.js's real pipeline — a domain can now actually send value to another domain, not only accrue new value from nothing. See changelog below and whitepaper §7/Appendix H.16.
 - [ ] The real compiled `.wasm` binary itself, tested in an actual browser — still open, and still cannot be produced in this sandbox (see "Build Rust → WASM" below); the wiring above is proven correct against a faithful fake, not yet against the real artifact CI produces
 - [ ] Transport (pluggable layer, §25)
 - [x] Modules (§27): open registration, content-addressed code integrity, real iframe sandbox mechanism — 18 JS + 15 Rust tests; closes R19 in the security property registry from "unconfirmed" to "specified and implemented, not adversarially tested" (Appendix H.11)
@@ -1126,3 +1126,35 @@ previous update to this README.)
   yet" to "demonstrated." 137 JS / 104 Rust unit tests unaffected (this
   was new integration tooling, not a change to reward.js/g.js's already
   re-verified logic).
+- Fixed a real regression: the `<script type="importmap">` resolving
+  `@noble/curves/ed25519` for the browser was lost during the domain-
+  identity rewrite (a full `index.html` rebuild that didn't carry it
+  over) — this blocked the entire module graph from loading, so every
+  button on the page was inert, not just plugin-related ones. Restored
+  and re-verified no other bare import specifiers exist anywhere in
+  `public/js/`.
+- Wired Conservation to economics — "how do I send AIWA to someone
+  else?" had no answer until now. `conservation-bridge.js` /
+  `conservation_bridge.rs` fold two new DAG event types over H_d, the
+  same pattern as every other reducer in this project:
+  `claim-issue` (debits a domain's real G-balance, creates a spendable
+  claim — g.js and conservation.js both watch the same event
+  independently, no new coordination mechanism) and `transfer` (runs
+  conservation.js's already-tested Deactivate→Prove→Verify→Consume→
+  Activate pipeline for real, not a new implementation). Wired into the
+  UI: a "Send AIWA" form per contact, and a "Claims owned" stat on the
+  Desktop. Verified directly, both languages: a domain that accrues 50
+  via a real cadence sequence, sends 20, ends at a balance of 30, while
+  the recipient — queried from its own independently materialized
+  Conservation state — owns a genuinely active claim of 20; a
+  double-spend (transferring an already-consumed claim again) is
+  rejected during the fold, the second recipient gets nothing; a
+  transfer claimed from a non-owner is rejected. 6 JS + 4 Rust new
+  tests. New whitepaper §7 bridge note and Appendix H.16. 143 JS / 110
+  Rust tests total.
+- Minor note: an earlier edit attempt to §7 used an invalid tool
+  parameter and silently deleted a paragraph instead of replacing it —
+  caught immediately by re-reading the file after the edit (not assumed
+  successful), and restored in the same turn before continuing. Recorded
+  per this project's own discipline of not hiding mistakes, including
+  its own.
