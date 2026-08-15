@@ -51,6 +51,7 @@
     .identity-row input { flex: 1; font: inherit; font-size: 0.8rem; padding: 0.3rem 0.4rem; border: 1px solid #ccc; border-radius: 5px; min-width: 0; }
     .identity-row button { font-size: 0.78rem; padding: 0.3rem 0.5rem; }
     .burn-btn { width: 100%; margin-top: 0.3rem; font-weight: 600; }
+    input[id$="-burn-amount"] { width: 100%; font: inherit; font-size: 0.8rem; padding: 0.3rem 0.4rem; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; margin-top: 0.3rem; }
     .identity-msg { font-size: 0.75rem; margin-top: 0.3rem; min-height: 1em; }
     .identity-msg.error { color: #b33; }
     .identity-msg.success { color: var(--link-up); }
@@ -110,7 +111,8 @@
             <button data-domain="earth" class="wallet-create-btn">Create</button>
             <button data-domain="earth" class="wallet-unlock-btn">Unlock</button>
           </div>
-          <button data-domain="earth" class="burn-btn" disabled>🔥 Register identity (burn 0.0001 SOL)</button>
+          <input type="number" id="earth-burn-amount" placeholder="Lamports to burn (any amount)" min="1" step="1" />
+          <button data-domain="earth" class="burn-btn" disabled>🔥 Register identity (burn)</button>
           <p class="identity-msg" id="earth-identity-msg"></p>
         </div>
 
@@ -139,7 +141,8 @@
             <button data-domain="mars" class="wallet-create-btn">Create</button>
             <button data-domain="mars" class="wallet-unlock-btn">Unlock</button>
           </div>
-          <button data-domain="mars" class="burn-btn" disabled>🔥 Register identity (burn 0.0001 SOL)</button>
+          <input type="number" id="mars-burn-amount" placeholder="Lamports to burn (any amount)" min="1" step="1" />
+          <button data-domain="mars" class="burn-btn" disabled>🔥 Register identity (burn)</button>
           <p class="identity-msg" id="mars-identity-msg"></p>
         </div>
 
