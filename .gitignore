@@ -6,8 +6,10 @@ rust-core/target/
 node_modules/
 package-lock.json
 
-# WASM build output copied into public/
-public/js/wasm/
+# WASM build output — was ignored when it was purely a local build
+# artifact; now committed automatically by ci.yml's wasm-build job so
+# the deployed site actually serves the compiled binary, not just the
+# JS fallback. Deliberately NOT ignored anymore.
 
 # OS
 .DS_Store
