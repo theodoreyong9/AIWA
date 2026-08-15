@@ -48,7 +48,7 @@ AIWA/
 │       │       ├── module-hash.js       ← §27.4 content-addressing for module code — pure, tested
 │       │       ├── module-registry.js   ← §27.1/§27.2 open registration + economic validation — pure, tested
 │       │       ├── module-registry-reducer.js ← registry as a materialized view over H_d — propagates via merge(), fixes a real gap the user found
-│       │       ├── module-rank.js       ← list sort key (reuses reward.js) + submission eligibility — two separate calculations, per the user
+│       │       ├── module-rank.js       ← list sort key (reuses reward.js) + submission eligibility — two separate calculations, per the user; rankFromIdentityAndCadence() connector has no Rust mirror yet
 │       │       ├── module-submission.js ← signed submission pipeline: replay guard + signature + hash re-check — pure, tested against real Ed25519
 │       │       ├── module-fetch.js      ← real fetch(codeUrl) + submission — untestable in this sandbox
 │       │       └── module-sandbox.js    ← §27.4 real iframe isolation — untestable in this sandbox
@@ -968,3 +968,22 @@ previous update to this README.)
   modeled on the real reference implementation's `checkScoreEligibility`),
   exactly the two distinct calculations the user described. 17 new/updated
   tests. 127 JS / 96 Rust total.
+- Rebuilt the app UI around the user's specified structure: a bottom
+  nav with 5 panels — Domain, Commit, Profile, Contacts, Parameters —
+  plus an Earth/Mars domain switcher, and a "desktop" of module icons
+  under Domain, sorted by rank. Nothing new invented at the logic
+  layer — every panel is a thin rendering pass over already-tested
+  functions (`DomainReplica`, the wallet/identity flow, `materializeG`,
+  `materializeModuleRegistry`, `rankFromIdentityAndCadence`). Verified
+  the real end-to-end chain outside the DOM before wiring it in: genesis
+  → 2 cadence advances → identity registered (burn 500 lamports) →
+  module registered → rank computed as `reward(500, 2, θ)` = 1000,
+  matching hand computation exactly. All DOM ids/classes referenced by
+  `main.js` cross-checked against `index.html` programmatically (no
+  mismatches). A minimal "Register a module" form was added (requires a
+  registered identity first) so the desktop is populated by real
+  registry data, not fixtures. `Parameters` also exposes θ (K, α, β) as
+  live-editable inputs affecting both domains' reward calculations.
+  `rankFromIdentityAndCadence()` (module-rank.js) added and tested (2
+  new tests) — no Rust mirror yet, noted rather than silently skipped.
+  129 JS / 90 Rust tests total.
