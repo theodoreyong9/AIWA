@@ -581,10 +581,19 @@ which backend is active. This translation logic is tested end to end
 (`tests/ledger-bridge.test.mjs`, `tests/wasm-ledger-adapter.test.mjs`)
 against a fake module built to the real Rust surface's exact shape, which
 is how two real shape mismatches were found and fixed before ever
-touching a browser. What this does **not** yet prove: that the real
-compiled `.wasm` binary, loaded in an actual browser, behaves identically
-to the fake — that step still needs the CI artifact and a real browser,
-and remains open (see Status below).
+touching a browser. **Update**: the real compiled `.wasm` binary is now
+committed automatically by CI (`ci.yml`'s `wasm-build` job, after fixing
+three real, distinct CI failures found only by reading actual job
+output rather than guessing — a lost executable bit, a stale
+`.gitignore` rule, and a `.gitignore` `wasm-pack` itself regenerates
+inside its own output directory on every build) and has been confirmed
+to load without error in a real deployed browser session — the specific
+gap this paragraph used to describe as open is closed, not merely
+believed closed. What remains genuinely unverified: that the loaded WASM
+module's *computed results* agree with the JS backend under real
+browser conditions beyond "it loads" — the shape-parity tests above give
+strong reason to expect this, but no test has yet compared live WASM-backed
+and JS-backed outputs side by side in an actual browser session.
 
 ## Cross-language id parity
 
@@ -673,7 +682,7 @@ previous update to this README.)
 - [x] Conservation Phases 4–5: deliberate non-atomic-consume counterexample (Appendix H.9.1), cross-language parity (Appendix H.9.2) — 7 new tests
 - [x] **Conservation plan complete** — all 5 phases done; §7's pre-existing "Appendix B.7" mis-citation fixed in the whitepaper
 - [x] Wire Conservation to economics: `claim-issue`/`transfer` DAG events bridge G's balance to conservation.js's real pipeline — a domain can now actually send value to another domain, not only accrue new value from nothing. See changelog below and whitepaper §7/Appendix H.16.
-- [ ] The real compiled `.wasm` binary itself, tested in an actual browser — still open, and still cannot be produced in this sandbox (see "Build Rust → WASM" below); the wiring above is proven correct against a faithful fake, not yet against the real artifact CI produces
+- [x] The real compiled `.wasm` binary, loaded in an actual deployed browser session — confirmed loading with zero errors (only an unrelated favicon 404 remained). CI now builds and commits this binary automatically (`ci.yml`'s `wasm-build` job); getting there required finding and fixing three separate, real CI failures (a lost executable bit from a web-UI re-upload, a stale root `.gitignore` rule, and — the one that actually mattered — a `.gitignore` `wasm-pack` silently regenerates *inside its own output directory* on every single build, defeating the repo's own `.gitignore` regardless of what it says). What's still open: a live, in-browser side-by-side comparison of WASM-backed vs. JS-backed computed results — the shape-parity tests give strong reason to expect agreement, but that specific comparison hasn't been run.
 - [ ] Transport (pluggable layer, §25)
 - [x] Modules (§27): open registration, content-addressed code integrity, real iframe sandbox mechanism — 18 JS + 15 Rust tests; closes R19 in the security property registry from "unconfirmed" to "specified and implemented, not adversarially tested" (Appendix H.11)
 - [x] Modules: signed submission pipeline (`module-submission.js`/`module_submission.rs`) — real Ed25519 signing (JS: `@noble/curves`, Rust: `ed25519-dalek`), replay-guarded, hash-checked against actually-fetched code, no economic gate on publishing (by design); 17 new tests
@@ -1158,3 +1167,30 @@ previous update to this README.)
   successful), and restored in the same turn before continuing. Recorded
   per this project's own discipline of not hiding mistakes, including
   its own.
+- Closed the project's longest-standing open item: the real compiled
+  WASM binary loading in an actual browser, previously undeliverable
+  from this sandbox by construction (no browser here). Wired `ci.yml`'s
+  `wasm-build` job to commit its output back to `main` automatically,
+  triggering the existing Pages deployment for real — then found and
+  fixed three genuinely distinct CI failures in sequence, each only by
+  reading actual job output rather than guessing from first principles:
+  (1) three parity scripts lost their executable bit through a
+  delete-then-web-upload cycle — fixed by invoking them as `bash
+  scripts/x.sh` instead of `./scripts/x.sh`, which is now permission-bit-
+  independent for good; (2) the repo's own root `.gitignore` still
+  excluded `public/js/wasm/` from an earlier phase when it really was
+  just a local build artifact; (3) after both of those were fixed, the
+  commit step kept reporting "nothing to commit" even though the build
+  demonstrably produced real files — traced to `wasm-pack` writing its
+  own single-byte `.gitignore` (content: `*`) *inside* the output
+  directory on every build, silently re-excluding everything regardless
+  of the repo's own `.gitignore`; fixed by deleting that generated file
+  immediately before staging. Confirmed end to end: the committed
+  `aiwa_core_bg.wasm` starts with the real WASM magic bytes (`00 61 73
+  6d`), is 120,656 bytes, and — checked directly in a real deployed
+  browser session, not simulated — loads with zero errors (only an
+  unrelated `favicon.ico` 404 remained in the console). What's still
+  open, stated precisely rather than left implied: a live side-by-side
+  comparison of WASM-backed vs. JS-backed computed results in the
+  browser hasn't been run — only that the module loads cleanly has been
+  confirmed.
