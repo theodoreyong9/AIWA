@@ -29,6 +29,6 @@ pub use modules::{
     select_identity_scheme, submit_module, validate_economic_config, validate_submission,
     verify_module_integrity, verify_submission_signature, AuditStatus, EconomicConfig,
     EligibilityResult, IdentityScheme, LastSubmission, ModuleEntry, ModuleRegistryState,
-    NewModule, RegisterOutcome, SubmissionEvent, SubmissionState, SubmitOutcome,
+    NewModule, RegisterOutcome, SubmissionEligibilityCheck, SubmissionEvent, SubmissionState, SubmitOutcome,
     ValidationOutcome, ValidationResult,
 };
