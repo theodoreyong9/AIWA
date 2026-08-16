@@ -40,6 +40,7 @@ import { rankFromIdentityAndCadence, checkSubmissionEligibility, computeModuleRa
 import { computeModuleHash } from '../core/modules/module-hash.js';
 import { buildSubmissionEvent, validateSubmission, initialSubmissionState, recordNonce } from '../core/modules/module-submission.js';
 import { mountModule } from '../core/modules/module-sandbox.js';
+import { getTheme, DEFAULT_THEME_ID } from '../core/presentation/theme-tokens.js';
 import { loadVerifiedModuleCode } from '../core/modules/module-loader.js';
 import { verifyModuleIntegrity } from '../core/modules/module-hash.js';
 
@@ -260,6 +261,7 @@ class DomainReplica {
 // ── Global state ────────────────────────────────────────────────────
 
 let theta = { budgets: {} }; // .reward removed — see currentRewardParams(); §10's constants now live at formula id 'genesis', not here
+let activeThemeId = DEFAULT_THEME_ID; // §27.5 presentation independence — a display preference, never DAG state
 let myDomain = null; // the one real domain this app instance represents — null until a wallet exists
 let testPeers = new Map(); // id -> DomainReplica, testing-only, never the primary UI concept
 let submissionState = initialSubmissionState();
@@ -448,7 +450,7 @@ async function runModule(entry) {
     },
   };
 
-  activePluginHandle = await mountModule(containerEl, entry, code, verifyModuleIntegrity, hostHandlers);
+  activePluginHandle = await mountModule(containerEl, entry, code, verifyModuleIntegrity, hostHandlers, getTheme(activeThemeId));
   log(`[${myDomain.id}] running '${entry.id}' in a sandboxed iframe`);
 }
 
@@ -863,6 +865,10 @@ async function main() {
   });
 
   document.getElementById('network-select').addEventListener('change', renderAll);
+  document.getElementById('theme-select').addEventListener('change', (e) => {
+    activeThemeId = e.target.value; // local display preference — deliberately never touches theta, myDomain, or any DAG state
+    log(`Presentation switched to '${activeThemeId}' — no module, rank, or economic state changed (§27.5).`);
+  });
   document.getElementById('contacts-search').addEventListener('input', renderContactsScreen);
 
   document.getElementById('create-test-peer-btn').addEventListener('click', createTestPeer);
