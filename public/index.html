@@ -215,6 +215,15 @@
       </div>
 
       <div class="card">
+        <h2>Presentation (§27.5)</h2>
+        <p class="hint">A display preference, not protocol state — never part of H_d. Switching this never touches which modules are registered, their rank, or any economic state; only how a plugin you run renders.</p>
+        <select id="theme-select">
+          <option value="default">Default</option>
+          <option value="compact">Compact (high-contrast, low-power)</option>
+        </select>
+      </div>
+
+      <div class="card">
         <h2>Reward formula (θ) — immutable once minted</h2>
         <p class="hint">r(b,q,q<sub>total</sub>,T) = (b · q<sup>α</sup>) / [ln(q<sub>total</sub><sup>β(1−T)</sup> + C)]<sup>γ</sup> — no longer a free-editable field. A formula id is permanent from the moment it's minted; only which one THIS domain currently uses can change.</p>
         <label class="field-label">Using formula</label>
