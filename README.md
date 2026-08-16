@@ -685,7 +685,7 @@ previous update to this README.)
 - [x] **Security**: `transfer` events now require a real Ed25519 signature proving control of the `from` domain, closing a forgery vulnerability where ownership was checked by string comparison alone. See whitepaper §7/Appendix H.18.
 - [x] Identity cost is now a materialized view over H_d (`identity-register` DAG events), not a standalone local variable — closes the exact "where do these live, this looks critical for interplanetary deployment" gap. See whitepaper §26/Appendix H.19.
 - [x] The real compiled `.wasm` binary, loaded in an actual deployed browser session — confirmed loading with zero errors (only an unrelated favicon 404 remained). CI now builds and commits this binary automatically (`ci.yml`'s `wasm-build` job); getting there required finding and fixing three separate, real CI failures (a lost executable bit from a web-UI re-upload, a stale root `.gitignore` rule, and — the one that actually mattered — a `.gitignore` `wasm-pack` silently regenerates *inside its own output directory* on every single build, defeating the repo's own `.gitignore` regardless of what it says). What's still open: a live, in-browser side-by-side comparison of WASM-backed vs. JS-backed computed results — the shape-parity tests give strong reason to expect agreement, but that specific comparison hasn't been run.
-- [x] Transport (pluggable layer, §25) — interface, delay-tolerant store-and-forward backend, and connection watchdog built and tested (21 tests, Appendix H.24). The WebRTC mesh backend remains an honest, explicit stub — real signaling infrastructure and real peers aren't available in this environment to verify it against.
+- [x] Transport (pluggable layer, §25) — interface, delay-tolerant store-and-forward backend, connection watchdog, AND wired into the real app's reconciliation action (no more direct dag.merge() shortcut — see changelog and Appendix H.24). The WebRTC mesh backend remains an honest, explicit stub — real signaling infrastructure and real peers aren't available in this environment to verify it against.
 - [x] Modules (§27): open registration, content-addressed code integrity, real iframe sandbox mechanism — 18 JS + 15 Rust tests; closes R19 in the security property registry from "unconfirmed" to "specified and implemented, not adversarially tested" (Appendix H.11)
 - [x] Modules: signed submission pipeline (`module-submission.js`/`module_submission.rs`) — real Ed25519 signing (JS: `@noble/curves`, Rust: `ed25519-dalek`), replay-guarded, hash-checked against actually-fetched code, no economic gate on publishing (by design); 17 new tests
 - [x] Modules: automated JS/Rust cross-language parity for the submission signing scheme — `scripts/verify-submission-parity.sh`, both directions confirmed with real Ed25519 keys
@@ -1433,3 +1433,25 @@ previous update to this README.)
   outage, watchdog fires once the timeout elapses, flush delivers once
   a real contact window opens. New whitepaper §25 update and Appendix
   H.24. 21 new tests (5 + 9 + 7). 194 JS tests total.
+- Wired Transport (§25) into the real app, not just built as a
+  standalone tested library — asked directly whether it was, and it
+  wasn't, the same turn the gap was named and closed. `DomainReplica`
+  now carries its own real `delay-tolerant-transport.js` and
+  `connection-watchdog.js` instance; the app's Reconcile action goes
+  through `transport.send()` instead of calling `dag.merge()` directly.
+  The one deliberately-simulated piece is delivery itself (a single
+  browser tab has no real network) — when a simulated link is up,
+  delivery is a real `dag.merge()` (content-addressed, idempotent, the
+  same mechanism already used everywhere in this project); when down,
+  the transport's own real queueing takes over, with no duplicate
+  queueing logic in the app. Added a link up/down toggle per test-peer
+  pair, a live queue-depth stat, and a flush button. Verified end to
+  end using the actual wired classes: a simulated partition confirmed
+  to queue a sync rather than silently deliver it (the recipient
+  provably still knows nothing of the sender); reconnecting and
+  flushing confirmed to deliver exactly what was queued, after which
+  both replicas' event counts match exactly. New whitepaper §25/
+  Appendix H.24 extension. 194 JS tests unaffected (no new test file
+  this pass — the wiring is exercised by the standalone verification
+  above and by the existing transport test suites it now actually
+  uses).
