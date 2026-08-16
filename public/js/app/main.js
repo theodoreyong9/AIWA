@@ -33,6 +33,9 @@ import { materializeConservation } from '../core/conservation/conservation-bridg
 import { rankFromIdentityAndCadence } from '../core/modules/module-rank.js';
 import { computeModuleHash } from '../core/modules/module-hash.js';
 import { buildSubmissionEvent, validateSubmission, initialSubmissionState, recordNonce } from '../core/modules/module-submission.js';
+import { mountModule } from '../core/modules/module-sandbox.js';
+import { loadVerifiedModuleCode } from '../core/modules/module-loader.js';
+import { verifyModuleIntegrity } from '../core/modules/module-hash.js';
 
 const WALLET_STORAGE_PREFIX = 'aiwa-wallet-';
 const DESKTOP_PIN_PREFIX = 'aiwa-desktop-pins-';
@@ -130,6 +133,8 @@ let testPeers = new Map(); // id -> DomainReplica, testing-only, never the prima
 let identityState = initialIdentityCostState();
 let submissionState = initialSubmissionState();
 let solanaWeb3 = null;
+let activePluginHandle = null; // { unmount } from mountModule(), or null
+const MODULE_STORAGE_PREFIX = 'aiwa-module-storage-';
 
 function currentNetwork() { return document.getElementById('network-select').value || DEFAULT_NETWORK; }
 function log(msg) {
@@ -246,6 +251,73 @@ function showDesktop() {
   document.getElementById('screen-desktop').classList.add('active');
 }
 
+// ── Plugin execution: real sandboxed iframe, real ctx bridge ────────
+
+function moduleStorageKey(domainId, moduleId, key) {
+  return `${MODULE_STORAGE_PREFIX}${domainId}-${moduleId}-${key}`;
+}
+
+async function runModule(entry) {
+  if (!myDomain) return;
+  const statusEl = document.getElementById('plugin-runner-status');
+  const titleEl = document.getElementById('plugin-runner-title');
+  const containerEl = document.getElementById('plugin-runner-container');
+  const runnerEl = document.getElementById('plugin-runner');
+
+  titleEl.textContent = `${entry.icon || '⬡'} ${entry.name}`;
+  statusEl.textContent = 'Fetching and verifying code…';
+  containerEl.innerHTML = '';
+  runnerEl.classList.remove('plugin-runner-hidden');
+
+  let code;
+  try {
+    code = await loadVerifiedModuleCode(entry);
+  } catch (err) {
+    statusEl.textContent = `❌ ${err.message}`;
+    log(`[${myDomain.id}] refused to run '${entry.id}': ${err.message}`);
+    return;
+  }
+  statusEl.textContent = '';
+
+  const hostHandlers = {
+    async onStorageGet(moduleId, key) {
+      return localStorage.getItem(moduleStorageKey(myDomain.id, moduleId, key));
+    },
+    async onStorageSet(moduleId, key, value) {
+      localStorage.setItem(moduleStorageKey(myDomain.id, moduleId, key), value);
+    },
+    onToast(moduleId, message, kind) {
+      log(`[plugin:${moduleId}] ${message}`);
+      statusEl.textContent = message;
+      statusEl.className = `hint ${kind === 'error' ? 'error' : ''}`;
+    },
+    async onCommit(moduleId, amount) {
+      if (!hasIdentityCost(identityState, myDomain.id)) throw new Error('domain has no registered identity — cannot commit');
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error('commit amount must be a positive number');
+      myDomain.commit(amount, 0);
+      log(`[plugin:${moduleId}] committed b=${amount} on behalf of ${myDomain.id}`);
+      renderAll();
+    },
+    async onClaim(moduleId) {
+      const n = await myDomain.claim();
+      log(`[plugin:${moduleId}] claimed ${n} commitment(s) on behalf of ${myDomain.id}`);
+      renderAll();
+      return n;
+    },
+  };
+
+  activePluginHandle = await mountModule(containerEl, entry, code, verifyModuleIntegrity, hostHandlers);
+  log(`[${myDomain.id}] running '${entry.id}' in a sandboxed iframe`);
+}
+
+function stopActiveModule() {
+  if (activePluginHandle) {
+    activePluginHandle.unmount();
+    activePluginHandle = null;
+  }
+  document.getElementById('plugin-runner').classList.add('plugin-runner-hidden');
+}
+
 // ── Renderers ─────────────────────────────────────────────────────
 
 function renderDesktop() {
@@ -285,9 +357,15 @@ function renderDesktop() {
     return;
   }
   emptyEl.style.display = 'none';
-  iconsEl.innerHTML = pinnedModules
-    .map((m) => `<div class="icon-tile" title="rank ${m.rank.toFixed(2)}"><div class="icon-glyph">${m.icon || '⬡'}</div><div>${m.name}</div></div>`)
-    .join('');
+  iconsEl.innerHTML = '';
+  for (const m of pinnedModules) {
+    const tile = document.createElement('div');
+    tile.className = 'icon-tile';
+    tile.title = `rank ${m.rank.toFixed(2)}`;
+    tile.innerHTML = `<div class="icon-glyph">${m.icon || '⬡'}</div><div>${m.name}</div>`;
+    tile.addEventListener('click', () => runModule(m));
+    iconsEl.appendChild(tile);
+  }
 }
 
 function renderDomainScreen() {
@@ -518,6 +596,7 @@ async function main() {
 
   document.getElementById('burn-btn').addEventListener('click', registerIdentityViaBurn);
   document.getElementById('submit-btn').addEventListener('click', submitPluginCode);
+  document.getElementById('plugin-runner-close').addEventListener('click', stopActiveModule);
 
   document.getElementById('commit-action-btn').addEventListener('click', () => {
     if (!myDomain) return;
