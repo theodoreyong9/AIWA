@@ -139,7 +139,12 @@ impl ConservationState {
     }
 
     /// Step 4: Consume. THE load-bearing invariant of §7:
-    /// count(Consume(p)) <= 1.
+    /// count(Consume(p)) <= 1. Direct port of the whitepaper's reference
+    /// pseudocode — see the citation note in conservation.js's matching
+    /// doc comment (§7 cites "Appendix B.7", but the formally numbered
+    /// B.7 is a different mechanism; the wallet consumption guard
+    /// pseudocode has no numbered sub-letter of its own in the source
+    /// document).
     pub fn consume(&mut self, proof: &Proof) -> Result<(), ConservationError> {
         if self.consumed.contains_key(&proof.id) {
             return Err(ConservationError(format!("Replay rejected: proof {} already consumed", proof.id)));
@@ -200,7 +205,7 @@ impl ConservationState {
 }
 
 pub mod conservation_bridge;
-pub use conservation_bridge::{apply_conservation_event, materialize_conservation};
+pub use conservation_bridge::{apply_conservation_event, materialize_conservation, ConservationBridgeState};
 
 #[cfg(test)]
 mod tests {
