@@ -1455,3 +1455,53 @@ previous update to this README.)
   this pass — the wiring is exercised by the standalone verification
   above and by the existing transport test suites it now actually
   uses).
+- **Made H_d actually durable — closed a real, serious gap found by
+  one direct question, not a routine improvement.** "La le DAG et les
+  données elles vivent que si les utilisateurs ont au moins un
+  ordinateur allumé sinon tout disparait?" — yes, before this: closing
+  the browser tab (or unlocking the same wallet fresh) wiped the entire
+  ledger. `unlockWalletAndDomain()` constructed a brand-new empty
+  `EventDag` on every call — same domain id, zero history, no different
+  from a domain that had never done anything. Only the wallet key
+  itself (localStorage) survived; every cadence advance, every accrual,
+  every burn's resulting identity registration, every minted formula,
+  every registered module, every AIWA sent or received lived only in a
+  JS variable. For a paper whose central claim is partition autonomy
+  under arbitrarily long communication loss, not surviving a closed tab
+  on the SAME machine was a sharper version of the exact failure mode
+  the whole architecture exists to rule out.
+  Closed with two pieces, kept deliberately separate: `event-dag.js`
+  gained a small, additive `subscribe()` — new events (from `addEvent()`
+  or `merge()`) notify listeners; a re-added already-known event does
+  not (6 new tests, including confirming `merge()` only notifies for
+  events genuinely new to the receiving side). `event-dag-persistence.js`
+  is the IndexedDB-touching half — real code, untestable via
+  `node --test` for the same reason `solana-rpc.js`'s real network
+  calls are, except for `topologicalSortForReplay()`, extracted as pure
+  logic and fully tested (5 tests), including the property that
+  actually matters: its output is confirmed replayable through a real
+  `EventDag` without ever hitting an unknown-parent rejection.
+  **Verified anyway, not left as an unverified claim**: built a
+  minimal, faithful in-memory fake of the `indexedDB` global (matching
+  only the operations the real code actually calls) to drive the real,
+  unmodified persistence code through two independently constructed
+  sessions. A domain that accrues a real balance across 5 real cadence
+  advances is confirmed, in a wholly separate second session against
+  the same simulated storage, to recover exactly 7 events (not 0), the
+  identical balance, and the identical cadence epoch — and confirmed
+  able to correctly *extend* that recovered history afterward
+  (`restoreTipsFromDag()`, a new method recovering the domain's real
+  tip from cadence's own tracked state, not resetting to genesis, which
+  would have silently orphaned everything the moment any post-restore
+  action tried to continue it — confirmed directly: a restored domain
+  correctly chains a new event from epoch 3 to epoch 4, never hitting
+  "Unknown parent"). Scoped deliberately: only the real domain
+  (`myDomain`) is persisted; test peers stay intentionally ephemeral,
+  matching their own documented "testing only" status. New whitepaper
+  §8.2 and Appendix H.25. 11 new tests (6 + 5). 205 JS tests total.
+- Confirmed the real Solana RPC code (`solana-rpc.js`) needed no
+  building — it already makes a real `fetch()` call to a real endpoint,
+  not a stub. It has simply never been exercised in this sandbox, which
+  has no network path to Solana — the same category of limitation as
+  everything else in this file's honesty-about-untested-network-code
+  discipline, not a gap to close with more code.
