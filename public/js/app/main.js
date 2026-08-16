@@ -32,7 +32,7 @@ import { materializeIdentity } from '../core/identity/identity-cost-reducer.js';
 import { SOLANA_NETWORKS, DEFAULT_NETWORK } from '../core/identity/solana-networks.js';
 import { materializeModuleRegistry } from '../core/modules/module-registry-reducer.js';
 import { materializeConservation, buildSignedTransferEvent } from '../core/conservation/conservation-bridge.js';
-import { rankFromIdentityAndCadence } from '../core/modules/module-rank.js';
+import { rankFromIdentityAndCadence, checkSubmissionEligibility, computeModuleRank } from '../core/modules/module-rank.js';
 import { computeModuleHash } from '../core/modules/module-hash.js';
 import { buildSubmissionEvent, validateSubmission, initialSubmissionState, recordNonce } from '../core/modules/module-submission.js';
 import { mountModule } from '../core/modules/module-sandbox.js';
@@ -586,6 +586,29 @@ async function submitPluginCode() {
     setMsg('submit-msg', `❌ ${check.reason}`, 'error');
     return;
   }
+
+  // checkSubmissionEligibility (module-rank.js) was built and tested
+  // since an earlier phase but never actually wired in — only gates a
+  // genuinely NEW module id, never an update to one this author already
+  // owns, matching the reasoning documented in module-rank.js itself.
+  if (!existing) {
+    const localIdentityState = myDomain.materializeIdentity();
+    const localCadence = myDomain.materialize().cadence;
+    const currentEpochsElapsed = localCadence.domains[myDomain.id]?.epoch ?? 0;
+    const identity = localIdentityState.registered[myDomain.id];
+    const currentRank = identity ? computeModuleRank(identity.burnedLamports, currentEpochsElapsed, theta.reward) : 0;
+    const lastSubmission = submissionState.lastSubmissionByAuthor[event.signerPubkey] ?? null;
+    const eligibility = checkSubmissionEligibility(currentRank, currentEpochsElapsed, lastSubmission);
+    if (!eligibility.eligible) {
+      setMsg('submit-msg', `❌ ${eligibility.reason}`, 'error');
+      return;
+    }
+    submissionState = {
+      ...submissionState,
+      lastSubmissionByAuthor: { ...submissionState.lastSubmissionByAuthor, [event.signerPubkey]: { rank: currentRank, epochsElapsed: currentEpochsElapsed } },
+    };
+  }
+
   submissionState = recordNonce(submissionState, event.nonce);
   await myDomain.foldSubmission(event, Boolean(existing));
   setMsg('submit-msg', `✅ ${existing ? 'Updated' : 'Registered'} '${moduleId}' — hash verified for real, signature verified for real.`, 'success');
