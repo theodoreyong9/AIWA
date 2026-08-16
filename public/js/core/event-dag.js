@@ -37,6 +37,32 @@ export class EventDag {
   constructor() {
     /** @type {Map<string, {id: string, parents: string[], payload: object}>} */
     this._events = new Map();
+    /** @type {Array<(event: {id: string, parents: string[], payload: object}) => void>} */
+    this._listeners = [];
+  }
+
+  /**
+   * Subscribes to genuinely-new events (not already-known ones re-added
+   * idempotently) as they enter the DAG via addEvent() or merge(). This
+   * is what event-dag-persistence.js uses to persist events durably —
+   * added here, not bolted on from outside, so it can't miss an event
+   * by reaching into this class's internals. JS-only, deliberately:
+   * this is an application/browser-storage concern, not part of the
+   * cross-language ledger contract addEvent()/materialize() are (see
+   * this file's own header) — the Rust/WASM module has no equivalent
+   * and does not need one.
+   * @param {(event: {id: string, parents: string[], payload: object}) => void} callback
+   * @returns {() => void} unsubscribe function
+   */
+  subscribe(callback) {
+    this._listeners.push(callback);
+    return () => {
+      this._listeners = this._listeners.filter((cb) => cb !== callback);
+    };
+  }
+
+  _notify(event) {
+    for (const cb of this._listeners) cb(event);
   }
 
   /**
@@ -66,7 +92,9 @@ export class EventDag {
     }
     const id = await this.computeId(parents, payload);
     if (!this._events.has(id)) {
-      this._events.set(id, { id, parents: [...parents], payload });
+      const event = { id, parents: [...parents], payload };
+      this._events.set(id, event);
+      this._notify(event);
     }
     return id;
   }
@@ -76,6 +104,7 @@ export class EventDag {
     for (const ev of otherDag._events.values()) {
       if (!this._events.has(ev.id)) {
         this._events.set(ev.id, ev);
+        this._notify(ev);
       }
     }
   }
