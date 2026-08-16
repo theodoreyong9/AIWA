@@ -32,6 +32,7 @@ import { materializeIdentity } from '../core/identity/identity-cost-reducer.js';
 import { SOLANA_NETWORKS, DEFAULT_NETWORK } from '../core/identity/solana-networks.js';
 import { materializeModuleRegistry } from '../core/modules/module-registry-reducer.js';
 import { materializeConservation, buildSignedTransferEvent } from '../core/conservation/conservation-bridge.js';
+import { materializeFormulas, GENESIS_FORMULA_ID, GENESIS_FORMULA_PARAMS } from '../core/economics/formula-registry-reducer.js';
 import { rankFromIdentityAndCadence, checkSubmissionEligibility, computeModuleRank } from '../core/modules/module-rank.js';
 import { computeModuleHash } from '../core/modules/module-hash.js';
 import { buildSubmissionEvent, validateSubmission, initialSubmissionState, recordNonce } from '../core/modules/module-submission.js';
@@ -61,6 +62,7 @@ class DomainReplica {
     this.lastCadenceId = null;
     this.epoch = 0;
     this.pending = [];
+    this.activeFormulaId = GENESIS_FORMULA_ID; // local choice, not DAG state — see mintFormula()'s header
   }
 
   async advanceCadence() {
@@ -105,7 +107,37 @@ class DomainReplica {
     this.lastEventId = this.genesisId;
   }
 
-  materialize() { return materializeG(theta, this.dag.topoOrder()); }
+  materialize() { return materializeG({ reward: this.currentRewardParams(), budgets: theta.budgets }, this.dag.topoOrder()); }
+  materializeFormulas() { return materializeFormulas(this.dag.topoOrder()); }
+
+  /** The active formula's params — 'genesis' (the real Proof-of-Will
+   * constants, §10) unless this domain has switched to a minted one. */
+  currentRewardParams() {
+    const registry = this.materializeFormulas();
+    return registry.formulas[this.activeFormulaId] ?? GENESIS_FORMULA_PARAMS;
+  }
+
+  /**
+   * Mints a NEW, permanent formula — answers "puis-je changer la
+   * formule quand je veux ? [...] ça doit être immuable" directly:
+   * theta used to be a plain JS variable, editable at any time in
+   * Parameters, never a DAG event — meaning two domains could silently
+   * disagree on what the SAME accrual event was worth (a real,
+   * unnamed fork). Now, the only way to get DIFFERENT parameters is to
+   * mint a brand-new, permanently-fixed formula id; the id this domain
+   * (or any domain) is currently USING is a separate, local,
+   * non-permanent choice (activeFormulaId) — switching which formula
+   * you use is not the same operation as changing one that exists.
+   * Requires a registered identity (checked by the caller before this
+   * is invoked, per the same application-layer gating pattern as
+   * checkSubmissionEligibility — the pure reducer itself enforces only
+   * immutability, not the burn requirement).
+   */
+  async mintFormula(id, params) {
+    const payload = { type: 'formula-register', id, alpha: params.alpha, beta: params.beta, gamma: params.gamma, C: params.C, minQ: params.minQ, mintedBy: this.id, at: this.epoch };
+    const newId = await this.dag.addEvent([this.lastEventId], payload);
+    this.lastEventId = newId;
+  }
   materializeModules() { return materializeModuleRegistry(this.dag.topoOrder()); }
   async materializeConservation() { return materializeConservation(this.dag.topoOrder()); }
   materializeIdentity() { return materializeIdentity(this.dag.topoOrder()); }
@@ -133,7 +165,7 @@ class DomainReplica {
 
 // ── Global state ────────────────────────────────────────────────────
 
-let theta = { reward: { alpha: 1.1, beta: 2.2, gamma: 3, C: 33 ** 3, minQ: 1 }, budgets: {} };
+let theta = { budgets: {} }; // .reward removed — see currentRewardParams(); §10's constants now live at formula id 'genesis', not here
 let myDomain = null; // the one real domain this app instance represents — null until a wallet exists
 let testPeers = new Map(); // id -> DomainReplica, testing-only, never the primary UI concept
 let submissionState = initialSubmissionState();
@@ -359,7 +391,7 @@ async function renderDesktop() {
   const pinned = new Set(pinnedIds(myDomain.id));
   const pinnedModules = Object.values(registry.modules)
     .filter((m) => pinned.has(m.id))
-    .map((m) => ({ ...m, rank: rankFromIdentityAndCadence(localIdentityState, gState.cadence, m.author, theta.reward) }))
+    .map((m) => ({ ...m, rank: rankFromIdentityAndCadence(localIdentityState, gState.cadence, m.author, myDomain.currentRewardParams()) }))
     .sort((a, b) => b.rank - a.rank);
 
   const iconsEl = document.getElementById('desktop-icons');
@@ -389,7 +421,7 @@ function renderDomainScreen() {
   const pinned = new Set(pinnedIds(myDomain.id));
   const modules = Object.values(registry.modules).map((m) => ({
     ...m,
-    rank: rankFromIdentityAndCadence(localIdentityState, gState.cadence, m.author, theta.reward),
+    rank: rankFromIdentityAndCadence(localIdentityState, gState.cadence, m.author, myDomain.currentRewardParams()),
   })).sort((a, b) => b.rank - a.rank);
 
   const listEl = document.getElementById('catalog-list');
@@ -497,11 +529,31 @@ function renderParametersScreen() {
     ? '⚠️ Mainnet mode: burns use <strong>real SOL</strong> and are <strong>irreversible</strong>.'
     : 'Devnet mode: burns use free faucet SOL and provide <strong>no real Sybil resistance</strong> (§24).';
 
-  document.getElementById('param-alpha').value = theta.reward.alpha;
-  document.getElementById('param-beta').value = theta.reward.beta;
-  document.getElementById('param-gamma').value = theta.reward.gamma;
-  document.getElementById('param-C').value = theta.reward.C;
-  document.getElementById('param-minQ').value = theta.reward.minQ;
+  if (myDomain) {
+    const formulaRegistry = myDomain.materializeFormulas();
+    const active = formulaRegistry.formulas[myDomain.activeFormulaId] ?? GENESIS_FORMULA_PARAMS;
+    document.getElementById('active-formula-id').textContent = myDomain.activeFormulaId;
+    document.getElementById('param-alpha').textContent = active.alpha;
+    document.getElementById('param-beta').textContent = active.beta;
+    document.getElementById('param-gamma').textContent = active.gamma;
+    document.getElementById('param-C').textContent = active.C;
+    document.getElementById('param-minQ').textContent = active.minQ;
+
+    const selectEl = document.getElementById('formula-select');
+    const currentSelection = selectEl.value;
+    selectEl.innerHTML = '';
+    for (const id of Object.keys(formulaRegistry.formulas)) {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = id;
+      selectEl.appendChild(opt);
+    }
+    selectEl.value = Object.keys(formulaRegistry.formulas).includes(currentSelection) ? currentSelection : myDomain.activeFormulaId;
+
+    const registered = hasIdentityCost(myDomain.materializeIdentity(), myDomain.id);
+    document.getElementById('mint-formula-btn').disabled = !registered;
+    document.getElementById('mint-gated-hint').style.display = registered ? 'none' : 'block';
+  }
 
   if (myDomain) {
     const registered = hasIdentityCost(myDomain.materializeIdentity(), myDomain.id);
@@ -596,7 +648,7 @@ async function submitPluginCode() {
     const localCadence = myDomain.materialize().cadence;
     const currentEpochsElapsed = localCadence.domains[myDomain.id]?.epoch ?? 0;
     const identity = localIdentityState.registered[myDomain.id];
-    const currentRank = identity ? computeModuleRank(identity.burnedLamports, currentEpochsElapsed, theta.reward) : 0;
+    const currentRank = identity ? computeModuleRank(identity.burnedLamports, currentEpochsElapsed, myDomain.currentRewardParams()) : 0;
     const lastSubmission = submissionState.lastSubmissionByAuthor[event.signerPubkey] ?? null;
     const eligibility = checkSubmissionEligibility(currentRank, currentEpochsElapsed, lastSubmission);
     if (!eligibility.eligible) {
@@ -673,26 +725,50 @@ async function main() {
   document.getElementById('network-select').addEventListener('change', renderAll);
   document.getElementById('contacts-search').addEventListener('input', renderContactsScreen);
 
-  ['param-alpha', 'param-beta', 'param-gamma', 'param-C', 'param-minQ'].forEach((id) => {
-    document.getElementById(id).addEventListener('change', async () => {
-      theta = {
-        ...theta,
-        reward: {
-          alpha: parseFloat(document.getElementById('param-alpha').value) || 0,
-          beta: parseFloat(document.getElementById('param-beta').value) || 0,
-          gamma: parseFloat(document.getElementById('param-gamma').value) || 0,
-          C: parseFloat(document.getElementById('param-C').value) || 0,
-          minQ: parseFloat(document.getElementById('param-minQ').value) || 0,
-        },
-      };
-      await renderAll();
-    });
-  });
-
   document.getElementById('create-test-peer-btn').addEventListener('click', createTestPeer);
   document.getElementById('reconcile-btn').addEventListener('click', () => {
     const target = document.getElementById('reconcile-target').value;
     if (target) reconcileWithTestPeer(target);
+  });
+
+  document.getElementById('formula-select').addEventListener('change', async (e) => {
+    if (!myDomain) return;
+    myDomain.activeFormulaId = e.target.value;
+    log(`[${myDomain.id}] switched active formula to '${e.target.value}' (a local choice — the formula itself is unchanged and permanent)`);
+    await renderAll();
+  });
+
+  document.getElementById('mint-formula-btn').addEventListener('click', async () => {
+    if (!myDomain) return;
+    const msgEl = document.getElementById('mint-msg');
+    if (!hasIdentityCost(myDomain.materializeIdentity(), myDomain.id)) {
+      msgEl.textContent = 'Requires a registered identity — minting a formula is a real economic object, gated the same way as issuing a module (§24.1).';
+      msgEl.className = 'msg error';
+      return;
+    }
+    const id = document.getElementById('mint-id').value.trim();
+    const alpha = parseFloat(document.getElementById('mint-alpha').value);
+    const beta = parseFloat(document.getElementById('mint-beta').value);
+    const gamma = parseFloat(document.getElementById('mint-gamma').value);
+    const C = parseFloat(document.getElementById('mint-C').value);
+    const minQ = parseFloat(document.getElementById('mint-minQ').value);
+    if (!id) return (msgEl.textContent = 'Enter a formula id.', msgEl.className = 'msg error');
+    if (![alpha, beta, gamma, C, minQ].every(Number.isFinite)) {
+      msgEl.textContent = 'All five parameters must be numbers.';
+      msgEl.className = 'msg error';
+      return;
+    }
+    await myDomain.mintFormula(id, { alpha, beta, gamma, C, minQ });
+    const registry = myDomain.materializeFormulas();
+    if (!registry.formulas[id]) {
+      msgEl.textContent = `❌ Mint rejected — '${id}' may already be taken, or 'genesis' is reserved.`;
+      msgEl.className = 'msg error';
+    } else {
+      msgEl.textContent = `✅ Minted '${id}' — permanent from now on, never editable again.`;
+      msgEl.className = 'msg success';
+      log(`[${myDomain.id}] minted formula '${id}'`);
+    }
+    await renderAll();
   });
 
   await renderAll();
