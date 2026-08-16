@@ -132,6 +132,11 @@ impl IdentityCostState {
     }
 }
 
+pub mod domain_id;
+pub mod identity_cost_reducer;
+pub use domain_id::{derive_domain_id, short_domain_label};
+pub use identity_cost_reducer::{apply_identity_event, materialize_identity};
+
 #[cfg(test)]
 mod tests {
     use super::*;
