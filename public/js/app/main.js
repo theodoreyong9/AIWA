@@ -32,6 +32,8 @@ import { materializeIdentity } from '../core/identity/identity-cost-reducer.js';
 import { SOLANA_NETWORKS, DEFAULT_NETWORK } from '../core/identity/solana-networks.js';
 import { materializeModuleRegistry } from '../core/modules/module-registry-reducer.js';
 import { materializeConservation, buildSignedTransferEvent } from '../core/conservation/conservation-bridge.js';
+import { createDelayTolerantTransport } from '../core/transport/delay-tolerant-transport.js';
+import { createConnectionWatchdog } from '../core/transport/connection-watchdog.js';
 import { materializeFormulas, GENESIS_FORMULA_ID, GENESIS_FORMULA_PARAMS } from '../core/economics/formula-registry-reducer.js';
 import { rankFromIdentityAndCadence, checkSubmissionEligibility, computeModuleRank } from '../core/modules/module-rank.js';
 import { computeModuleHash } from '../core/modules/module-hash.js';
@@ -52,6 +54,52 @@ const CONTACT_DELAY_PREFIX = 'aiwa-contact-delay-';
 
 // ── Domain replica ──────────────────────────────────────────────────
 
+// ── Simulated network: real transport, real queueing, simulated wire ─
+//
+// There is no real network in this browser tab — this is honestly a
+// simulation, not a claim otherwise. What is NOT simulated: the
+// transport layer itself. Every domain's sync goes through a real
+// createDelayTolerantTransport() instance (queue-then-attempt,
+// FIFO-per-peer, real flush()), exactly as it would with a real
+// backend behind sendFn. Only the "did the bytes actually leave the
+// machine" primitive is faked, using the same untestable-network-seam
+// pattern as solana-rpc.js — the queueing/timing logic built on top is
+// exercised for real, not mocked away.
+
+const allDomains = new Map(); // id -> DomainReplica, every real+test domain this tab knows about
+const linkStates = new Map(); // "idA|idB" (sorted) -> boolean, connectivity between a pair — defaults to up
+
+function linkKey(a, b) {
+  return [a, b].sort().join('|');
+}
+function isLinkUp(a, b) {
+  return linkStates.get(linkKey(a, b)) ?? true;
+}
+function setLinkUp(a, b, up) {
+  linkStates.set(linkKey(a, b), up);
+}
+
+/**
+ * The transport's injected sendFn — the one deliberately-fake piece.
+ * When the simulated link is up, delivery is a real DAG merge()
+ * (content-addressed, idempotent — the same mechanism proven correct
+ * throughout this project, not a new serialization format invented for
+ * this demo). When down, returns false, and the transport's own real
+ * queueing logic takes over — this file has no queueing logic of its
+ * own to keep in sync with delay-tolerant-transport.js's.
+ */
+async function simulatedNetworkSend(fromId, toId, _payload) {
+  if (!isLinkUp(fromId, toId)) return false;
+  const from = allDomains.get(fromId);
+  const to = allDomains.get(toId);
+  if (!from || !to) return false;
+  to.dag.merge(from.dag);
+  from.dag.merge(to.dag);
+  to.watchdog.recordActivity();
+  from.watchdog.recordActivity();
+  return true;
+}
+
 class DomainReplica {
   constructor(id, dag, keypair) {
     this.id = id;
@@ -63,6 +111,28 @@ class DomainReplica {
     this.epoch = 0;
     this.pending = [];
     this.activeFormulaId = GENESIS_FORMULA_ID; // local choice, not DAG state — see mintFormula()'s header
+    this.transport = createDelayTolerantTransport((peerId, payload) => simulatedNetworkSend(this.id, peerId, payload));
+    this.watchdog = createConnectionWatchdog({
+      timeoutMs: 15000,
+      onStale: () => log(`[${this.id}] connection watchdog: no activity for 15s — a real deployment would tear down and reinitialize the transport here (§25)`),
+    });
+    allDomains.set(id, this);
+  }
+
+  /**
+   * Attempts to sync with `peerId` through the real transport — queues
+   * if the simulated link is down, delivers a real DAG merge if up.
+   * Replaces the earlier direct dag.merge() call this app used before
+   * the transport layer existed: reconciliation now genuinely goes
+   * through delay-tolerant-transport.js's queue-then-attempt logic,
+   * not a special-cased shortcut.
+   */
+  async syncWith(peerId) {
+    return this.transport.send(peerId, { type: 'sync-request' });
+  }
+
+  async flushTransport() {
+    return this.transport.flush();
   }
 
   async advanceCadence() {
@@ -575,6 +645,19 @@ function renderParametersScreen() {
   }
   if (testPeers.has(currentTarget)) targetSelect.value = currentTarget;
   document.getElementById('reconcile-btn').disabled = testPeers.size === 0 || !myDomain;
+
+  const selectedPeer = targetSelect.value;
+  if (myDomain && selectedPeer) {
+    const linkUp = isLinkUp(myDomain.id, selectedPeer);
+    document.getElementById('link-toggle-btn').textContent = linkUp ? '🔗 Link up — click to simulate a partition' : '⛓️‍💥 Link down — click to reconnect';
+    document.getElementById('link-toggle-btn').disabled = false;
+    document.getElementById('queue-depth-display').textContent = String(myDomain.transport.queueDepth(selectedPeer));
+    document.getElementById('flush-btn').disabled = myDomain.transport.queueDepth(selectedPeer) === 0;
+  } else {
+    document.getElementById('link-toggle-btn').disabled = true;
+    document.getElementById('queue-depth-display').textContent = '–';
+    document.getElementById('flush-btn').disabled = true;
+  }
 }
 
 async function renderAll() {
@@ -602,15 +685,26 @@ async function createTestPeer() {
 
 async function reconcileWithTestPeer(peerId) {
   if (!myDomain) return;
-  const peer = testPeers.get(peerId);
+  const peer = allDomains.get(peerId);
   if (!peer) return;
-  myDomain.dag.merge(peer.dag);
-  peer.dag.merge(myDomain.dag);
+  const delivered = await myDomain.syncWith(peerId);
+  if (!delivered) {
+    log(`[${myDomain.id}] sync with '${peerId}' queued — simulated link is down (real delay-tolerant queueing, not a shortcut). ${myDomain.transport.queueDepth(peerId)} message(s) waiting.`);
+    await renderAll();
+    return;
+  }
   const mineFromMine = myDomain.materialize().balances[myDomain.id] ?? 0;
   const mineFromPeer = peer.materialize().balances[myDomain.id] ?? 0;
   const converged = mineFromMine === mineFromPeer;
-  log(`Reconciled with test peer '${peerId}' (${myDomain.dag.size} events on both sides now).`);
+  log(`Reconciled with test peer '${peerId}' via transport (${myDomain.dag.size} events on both sides now).`);
   log(converged ? 'Convergence check passed: both replicas agree (§9).' : 'Convergence check FAILED — bug.');
+  await renderAll();
+}
+
+async function flushPendingSync() {
+  if (!myDomain) return;
+  const count = await myDomain.flushTransport();
+  log(`[${myDomain.id}] flush attempted — ${count} queued message(s) actually delivered this pass.`);
   await renderAll();
 }
 
@@ -748,6 +842,28 @@ async function main() {
     const target = document.getElementById('reconcile-target').value;
     if (target) reconcileWithTestPeer(target);
   });
+
+  document.getElementById('reconcile-target').addEventListener('change', renderParametersScreen);
+
+  document.getElementById('link-toggle-btn').addEventListener('click', async () => {
+    if (!myDomain) return;
+    const target = document.getElementById('reconcile-target').value;
+    if (!target) return;
+    const nowUp = !isLinkUp(myDomain.id, target);
+    setLinkUp(myDomain.id, target, nowUp);
+    log(`[${myDomain.id}] simulated link with '${target}' set to ${nowUp ? 'UP' : 'DOWN'}.`);
+    await renderAll();
+  });
+
+  document.getElementById('flush-btn').addEventListener('click', flushPendingSync);
+
+  // Real periodic staleness detection — the watchdog logic itself is
+  // already fully tested with an injected clock (connection-watchdog.test.mjs);
+  // this interval is just what calls checkStale() on a real wall clock
+  // in the live app, the one piece that can't be unit-tested.
+  setInterval(() => {
+    if (myDomain) myDomain.watchdog.checkStale();
+  }, 5000);
 
   document.getElementById('formula-select').addEventListener('change', async (e) => {
     if (!myDomain) return;
