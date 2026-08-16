@@ -151,6 +151,19 @@
         <input id="submit-url" placeholder="https://raw.githubusercontent.com/you/repo/main/weather.js" />
         <label class="field-label">Code</label>
         <textarea id="submit-code" rows="4" placeholder="window.YM_S['weather.js'] = { ... }"></textarea>
+        <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;margin:0.5rem 0">
+          <input type="checkbox" id="submit-issuing" style="width:auto" /> This module issues its own economic rewards (§27.2)
+        </label>
+        <div id="issuing-fields" style="display:none">
+          <p class="hint">Lemma 1 (§11): a time-sensitive reward needs a stronger event-identity scheme than a time-insensitive one — declaring this honestly here is what lets the runtime pick the cheaper scheme automatically when it's actually safe to.</p>
+          <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;margin-bottom:0.4rem">
+            <input type="checkbox" id="submit-time-sensitive" style="width:auto" /> Reward depends on elapsed cadence time (q)
+          </label>
+          <label class="field-label">α (economicConfig, §24.1 — ≤1 requires a registered identity cost on this domain)</label>
+          <input type="number" id="submit-alpha" step="0.1" value="1" style="margin-bottom:0.4rem" />
+          <label class="field-label">Scarcity policy (§13, free text for now)</label>
+          <input id="submit-scarcity" placeholder="e.g. domain-budget" style="margin-bottom:0.4rem" />
+        </div>
         <button id="submit-btn" class="full-btn">Sign &amp; submit</button>
         <p class="msg" id="submit-msg"></p>
       </div>
