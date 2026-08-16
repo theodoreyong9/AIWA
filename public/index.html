@@ -202,17 +202,34 @@
       </div>
 
       <div class="card">
-        <h2>Reward parameters (θ) — Proof-of-Will structure</h2>
-        <p class="hint">r(b,q,q<sub>total</sub>,T) = (b · q<sup>α</sup>) / [ln(q<sub>total</sub><sup>β(1−T)</sup> + C)]<sup>γ</sup></p>
+        <h2>Reward formula (θ) — immutable once minted</h2>
+        <p class="hint">r(b,q,q<sub>total</sub>,T) = (b · q<sup>α</sup>) / [ln(q<sub>total</sub><sup>β(1−T)</sup> + C)]<sup>γ</sup> — no longer a free-editable field. A formula id is permanent from the moment it's minted; only which one THIS domain currently uses can change.</p>
+        <label class="field-label">Using formula</label>
+        <select id="formula-select" style="margin-bottom:0.5rem"></select>
+        <p class="stat-row"><span>Active id</span><span id="active-formula-id">genesis</span></p>
+        <p class="stat-row"><span>α (on q)</span><span id="param-alpha">–</span></p>
+        <p class="stat-row"><span>β (on q_total)</span><span id="param-beta">–</span></p>
+        <p class="stat-row"><span>γ (outer)</span><span id="param-gamma">–</span></p>
+        <p class="stat-row"><span>C (stabilization)</span><span id="param-C">–</span></p>
+        <p class="stat-row"><span>minQ (min wait, epochs)</span><span id="param-minQ">–</span></p>
+      </div>
+
+      <div class="card">
+        <h2>Mint a new formula</h2>
+        <p class="hint">A genuinely new economic object — permanent from the moment it's registered, never editable again. Requires a registered identity (§24.1's same anti-splitting reasoning applies to minting a new economic object as it does to issuing a module).</p>
+        <input id="mint-id" placeholder="formula id, e.g. my-formula" style="margin-bottom:0.4rem" />
         <div class="row">
-          <div><label class="field-label">α (on q)</label><input type="number" id="param-alpha" step="0.1" /></div>
-          <div><label class="field-label">β (on q_total)</label><input type="number" id="param-beta" step="0.1" /></div>
-          <div><label class="field-label">γ (outer)</label><input type="number" id="param-gamma" step="0.1" /></div>
+          <div><label class="field-label">α</label><input type="number" id="mint-alpha" step="0.1" value="1" /></div>
+          <div><label class="field-label">β</label><input type="number" id="mint-beta" step="0.1" value="0" /></div>
+          <div><label class="field-label">γ</label><input type="number" id="mint-gamma" step="0.1" value="1" /></div>
         </div>
         <div class="row">
-          <div><label class="field-label">C (stabilization)</label><input type="number" id="param-C" step="1" /></div>
-          <div><label class="field-label">minQ (min wait, epochs)</label><input type="number" id="param-minQ" step="1" /></div>
+          <div><label class="field-label">C</label><input type="number" id="mint-C" step="1" value="1" /></div>
+          <div><label class="field-label">minQ</label><input type="number" id="mint-minQ" step="1" value="1" /></div>
         </div>
+        <button id="mint-formula-btn" class="full-btn" disabled>Mint (permanent, requires identity)</button>
+        <p class="hint" id="mint-gated-hint">Requires identity registration (§24/§26).</p>
+        <p class="msg" id="mint-msg"></p>
       </div>
 
       <div class="card">
