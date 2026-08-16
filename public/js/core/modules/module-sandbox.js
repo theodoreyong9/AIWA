@@ -59,15 +59,26 @@ export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens) {
   var MODULE_ID = ${escapedId};
   var pending = new Map();
   var nextCallId = 0;
+  var peerMessageListeners = [];
 
   window.addEventListener('message', function (event) {
     var msg = event.data;
-    if (!msg || msg.channel !== 'aiwa-ctx-response') return;
-    var resolver = pending.get(msg.callId);
-    if (!resolver) return;
-    pending.delete(msg.callId);
-    if (msg.error) resolver.reject(new Error(msg.error));
-    else resolver.resolve(msg.result);
+    if (!msg) return;
+    if (msg.channel === 'aiwa-ctx-response') {
+      var resolver = pending.get(msg.callId);
+      if (!resolver) return;
+      pending.delete(msg.callId);
+      if (msg.error) resolver.reject(new Error(msg.error));
+      else resolver.resolve(msg.result);
+      return;
+    }
+    // Inbound: a message the host is pushing IN, not a response to a
+    // call this module made — the host initiates this (a peer sent
+    // something targeting this module's id via the real transport,
+    // §25), it is never something the module itself requests.
+    if (msg.channel === 'aiwa-peer-message') {
+      for (var i = 0; i < peerMessageListeners.length; i++) peerMessageListeners[i](msg.peerId, msg.data);
+    }
   });
 
   function callHost(method, args) {
@@ -87,6 +98,17 @@ export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens) {
     commit: function (amount) { return callHost('commit', [amount]); },
     claim: function () { return callHost('claim', []); },
     theme: ${escapedTheme},
+    // Distinct from storage: durable, DAG-replicated, visible to any
+    // domain that reconciles with this one (public-profile-reducer.js)
+    // — never confuse this with storage.set, which stays private.
+    // value === null retracts a previously-published key.
+    share: function (key, value) { return callHost('share', [key, value]); },
+    // Real-time, peer-addressed — routed through the real transport
+    // (§25) to the SAME module id running on the target domain, if it
+    // is currently mounted there. Not durable, not part of H_d — this
+    // is interaction, not a ledger fact.
+    sendToPeer: function (peerId, data) { return callHost('sendToPeer', [peerId, data]); },
+    onPeerMessage: function (callback) { peerMessageListeners.push(callback); },
   };
 
   try {
@@ -119,6 +141,8 @@ export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens) {
  *   onToast: (moduleId: string, message: string, kind: string) => void,
  *   onCommit: (moduleId: string, amount: number) => Promise<void>,
  *   onClaim: (moduleId: string) => Promise<number>,
+ *   onShare: (moduleId: string, key: string, value: any) => Promise<void>,
+ *   onSendToPeer: (moduleId: string, peerId: string, data: any) => Promise<boolean>,
  * }} hostHandlers
  */
 export async function mountModule(container, entry, code, verifyFn, hostHandlers, theme = DEFAULT_THEME) {
@@ -153,6 +177,8 @@ export async function mountModule(container, entry, code, verifyFn, hostHandlers
       else if (msg.method === 'toast') result = hostHandlers.onToast(entry.id, msg.args[0], msg.args[1]);
       else if (msg.method === 'commit') result = await hostHandlers.onCommit(entry.id, msg.args[0]);
       else if (msg.method === 'claim') result = await hostHandlers.onClaim(entry.id);
+      else if (msg.method === 'share') result = await hostHandlers.onShare(entry.id, msg.args[0], msg.args[1]);
+      else if (msg.method === 'sendToPeer') result = await hostHandlers.onSendToPeer(entry.id, msg.args[0], msg.args[1]);
       else throw new Error(`Unknown ctx method: ${msg.method}`);
     } catch (err) {
       error = err.message;
@@ -167,6 +193,18 @@ export async function mountModule(container, entry, code, verifyFn, hostHandlers
     unmount() {
       window.removeEventListener('message', onMessage);
       iframe.remove();
+    },
+    /**
+     * Pushes an inbound peer message INTO this already-mounted module —
+     * the host-initiated counterpart to ctx.sendToPeer(). Called by
+     * main.js when a real transport message (§25) arrives tagged for
+     * this exact module id while it happens to be the one currently
+     * running; if no module is mounted, or a different one is, the
+     * caller simply doesn't call this — there's no queue on this side,
+     * a module only ever sees peer messages while it's actually open.
+     */
+    deliverPeerMessage(peerId, data) {
+      iframe.contentWindow.postMessage({ channel: 'aiwa-peer-message', peerId, data }, '*');
     },
   };
 }
