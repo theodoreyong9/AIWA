@@ -107,7 +107,7 @@ export function verifySubmissionSignature(event) {
 }
 
 export function initialSubmissionState() {
-  return { usedNonces: {} };
+  return { usedNonces: {}, lastSubmissionByAuthor: {} };
 }
 
 /**
@@ -153,32 +153,60 @@ export async function validateSubmission(submissionState, event, code) {
  * project (§7's consume(), identity-cost.js's usedSignatures).
  */
 export function recordNonce(submissionState, nonce) {
-  return { usedNonces: { ...submissionState.usedNonces, [nonce]: true } };
+  return { ...submissionState, usedNonces: { ...submissionState.usedNonces, [nonce]: true } };
 }
 
 /**
  * The full pure pipeline: validate the submission against the actual
- * fetched code, then register (new module id) or update (existing id)
- * in the module registry, then record the nonce — all or nothing. Still
- * takes `code` pre-fetched, so this stays network-free and fully
- * testable; the one thin, untestable piece is fetching `code` from
+ * fetched code, check eligibility for a genuinely NEW module id
+ * (module-rank.js's checkSubmissionEligibility — built and tested since
+ * an earlier phase, never actually wired into this pipeline until now),
+ * then register or update in the module registry, then record the
+ * nonce and the author's fresh rank — all or nothing. Still takes
+ * `code` pre-fetched, so this stays network-free and fully testable;
+ * the one thin, untestable piece is fetching `code` from
  * `event.codeUrl` in the first place (see module-fetch.js).
  *
+ * Eligibility only ever gates a genuinely NEW module id, never an
+ * update to one the author already owns — matching module-rank.js's
+ * own documented reasoning: an author improving their own existing
+ * module should never be throttled by a rank-based gate meant to deter
+ * spamming many low-effort new registrations.
+ *
  * @param {import('./module-registry.js').ModuleRegistryState} registryState
- * @param {{ usedNonces: Record<string, true> }} submissionState
+ * @param {{ usedNonces: Record<string, true>, lastSubmissionByAuthor: Record<string, {rank: number, epochsElapsed: number}> }} submissionState
  * @param {SubmissionEvent} event
  * @param {string} code
- * @param {{ now?: number, registerModuleFn: Function, updateModuleCodeFn: Function }} deps
+ * @param {{
+ *   now?: number, registerModuleFn: Function, updateModuleCodeFn: Function,
+ *   checkEligibilityFn?: (authorPubkey: string, lastSubmission: {rank: number, epochsElapsed: number} | null) =>
+ *     { eligible: boolean, reason?: string, rank: number, epochsElapsed: number }
+ * }} deps
  *   registerModuleFn/updateModuleCodeFn are injected from
  *   module-registry.js by the caller, avoiding a circular import here.
+ *   checkEligibilityFn is injected the same way from main.js, since
+ *   computing rank requires identity-cost state and cadence state this
+ *   file has no business importing — if omitted, no eligibility check
+ *   is applied (matches every existing caller/test written before this
+ *   was wired in).
  */
-export async function submitModule(registryState, submissionState, event, code, { now = Date.now(), registerModuleFn, updateModuleCodeFn }) {
+export async function submitModule(registryState, submissionState, event, code, { now = Date.now(), registerModuleFn, updateModuleCodeFn, checkEligibilityFn }) {
   const check = await validateSubmission(submissionState, event, code);
   if (!check.valid) {
     return { registryState, submissionState, accepted: false, reason: check.reason };
   }
 
   const alreadyRegistered = Boolean(registryState.modules[event.moduleId]);
+
+  let eligibility = null;
+  if (!alreadyRegistered && checkEligibilityFn) {
+    const lastSubmission = submissionState.lastSubmissionByAuthor[event.signerPubkey] ?? null;
+    eligibility = checkEligibilityFn(event.signerPubkey, lastSubmission);
+    if (!eligibility.eligible) {
+      return { registryState, submissionState, accepted: false, reason: eligibility.reason };
+    }
+  }
+
   let result;
   if (alreadyRegistered) {
     result = updateModuleCodeFn(registryState, { id: event.moduleId, codeHash: event.codeHash, codeUrl: event.codeUrl });
@@ -206,9 +234,17 @@ export async function submitModule(registryState, submissionState, event, code, 
     return { registryState, submissionState, accepted: false, reason: result.reason };
   }
 
+  let newSubmissionState = recordNonce(submissionState, event.nonce);
+  if (eligibility) {
+    newSubmissionState = {
+      ...newSubmissionState,
+      lastSubmissionByAuthor: { ...newSubmissionState.lastSubmissionByAuthor, [event.signerPubkey]: { rank: eligibility.rank, epochsElapsed: eligibility.epochsElapsed } },
+    };
+  }
+
   return {
     registryState: result.state,
-    submissionState: recordNonce(submissionState, event.nonce),
+    submissionState: newSubmissionState,
     accepted: true,
     isUpdate: alreadyRegistered,
   };
