@@ -13,9 +13,10 @@ pub use conservation::{
 pub use core::EventDagCore;
 pub use dag::EventDag;
 pub use economics::{
-    elapsed_epochs, reward, simulate_hourly_issuance, AccrualRejection, CadenceState,
-    DomainCadenceState, DomainConfig, DomainScarcityState, GState, RewardParams, ScarcityState,
-    Snapshot, Theta,
+    apply_formula_event, elapsed_epochs, materialize_formulas, reward, simulate_hourly_issuance,
+    AccrualRejection, CadenceState, DomainCadenceState, DomainConfig, DomainScarcityState,
+    FormulaParams, FormulaRegistryState, FormulaRejection, GState, MintedFormula, RewardParams,
+    ScarcityState, Snapshot, Theta, GENESIS_FORMULA_ID, GENESIS_FORMULA_PARAMS,
 };
 pub use event::Event;
 pub use identity::{
