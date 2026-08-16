@@ -437,7 +437,8 @@ function renderDomainScreen() {
     const row = document.createElement('div');
     row.className = 'catalog-row';
     const isPinned = pinned.has(m.id);
-    row.innerHTML = `<div class="catalog-icon">${m.icon || '⬡'}</div><div class="catalog-info"><div class="catalog-name">${m.name}</div><div class="catalog-meta">rank ${m.rank.toFixed(2)} · ${m.auditStatus}</div></div><button data-id="${m.id}">${isPinned ? '− Remove' : '+ Add'}</button>`;
+    const schemeLabel = m.identityScheme ? (m.identityScheme === 'strong' ? '🔒 strong id' : '🔓 weak id') : 'non-issuing';
+    row.innerHTML = `<div class="catalog-icon">${m.icon || '⬡'}</div><div class="catalog-info"><div class="catalog-name">${m.name}</div><div class="catalog-meta">rank ${m.rank.toFixed(2)} · ${m.auditStatus} · <span title="§11's Lemma 1: strong id required whenever this module's own reward is time-sensitive; weak id is cheaper and safe only when it isn't.">${schemeLabel}</span></div></div><button data-id="${m.id}">${isPinned ? '− Remove' : '+ Add'}</button>`;
     row.querySelector('button').addEventListener('click', async () => { togglePin(myDomain.id, m.id); await renderAll(); });
     listEl.appendChild(row);
   }
@@ -628,8 +629,22 @@ async function submitPluginCode() {
   const pubkeyBytes = myDomain.keypair.publicKey.toBytes();
   const existing = myDomain.materializeModules().modules[moduleId];
 
+  const isIssuing = document.getElementById('submit-issuing').checked;
+  let timeSensitive = null;
+  let economicConfig = null;
+  if (isIssuing) {
+    timeSensitive = document.getElementById('submit-time-sensitive').checked;
+    const alpha = parseFloat(document.getElementById('submit-alpha').value);
+    const scarcityPolicy = document.getElementById('submit-scarcity').value.trim();
+    // identityCostMechanism is derived, not typed: whether THIS domain
+    // actually has a verified burn right now — matching §24.1's real
+    // requirement (a genuine identity cost, not a self-declared label).
+    const identityCostMechanism = hasIdentityCost(myDomain.materializeIdentity(), myDomain.id) ? 'sol-burn' : null;
+    economicConfig = { alpha, identityCostMechanism, scarcityPolicy: scarcityPolicy || null };
+  }
+
   const event = buildSubmissionEvent(
-    { moduleId, codeHash, codeUrl, name: moduleId, icon: '⬡', category: 'Tools', description: '', isIssuing: false, timeSensitive: null, economicConfig: null },
+    { moduleId, codeHash, codeUrl, name: moduleId, icon: '⬡', category: 'Tools', description: '', isIssuing, timeSensitive, economicConfig },
     seed, pubkeyBytes
   );
 
@@ -686,6 +701,9 @@ async function main() {
 
   document.getElementById('burn-btn').addEventListener('click', registerIdentityViaBurn);
   document.getElementById('submit-btn').addEventListener('click', submitPluginCode);
+  document.getElementById('submit-issuing').addEventListener('change', (e) => {
+    document.getElementById('issuing-fields').style.display = e.target.checked ? 'block' : 'none';
+  });
   document.getElementById('plugin-runner-close').addEventListener('click', stopActiveModule);
 
   document.getElementById('commit-action-btn').addEventListener('click', async () => {
