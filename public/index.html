@@ -247,10 +247,13 @@
 
       <div class="card">
         <h2>Testing — simulate a remote peer</h2>
-        <p class="hint">Not part of the real protocol — creates a second local identity purely so Reconcile can be demonstrated in a single browser. A real second domain is just another device running AIWA with its own wallet.</p>
+        <p class="hint">Not part of the real protocol — creates a second local identity purely so Reconcile can be demonstrated in a single browser. A real second domain is just another device running AIWA with its own wallet. Sync now goes through the real transport layer (§25) — delay-tolerant queueing, not a direct shortcut.</p>
         <button id="create-test-peer-btn" class="full-btn">Create test peer</button>
         <select id="reconcile-target" style="margin-top:0.5rem"></select>
-        <button id="reconcile-btn" class="full-btn" disabled>🔄 Reconcile with selected</button>
+        <button id="reconcile-btn" class="full-btn" disabled>🔄 Sync with selected (via transport)</button>
+        <button id="link-toggle-btn" class="full-btn" disabled style="margin-top:0.3rem">🔗 Link up — click to simulate a partition</button>
+        <p class="stat-row"><span>Queued for selected peer</span><span id="queue-depth-display">–</span></p>
+        <button id="flush-btn" class="full-btn" disabled>📤 Flush queue now</button>
       </div>
 
       <div class="card">
