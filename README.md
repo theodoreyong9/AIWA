@@ -691,7 +691,8 @@ previous update to this README.)
 - [x] Modules: automated JS/Rust cross-language parity for the submission signing scheme — `scripts/verify-submission-parity.sh`, both directions confirmed with real Ed25519 keys
 - [x] Modules: the optional §24.3 ψ growth-condition symbolic check (deliberately out of scope, not required by the paper's own pseudocode). `checkSubmissionEligibility()` is now wired into the real submission pipeline (was built and tested but unused — see changelog and whitepaper §27.4.1/Appendix H.20).
 - [x] Conservation-to-economics wiring (§6–7) — `claim-issue`/`transfer` DAG events, signed (Appendix H.16, H.18)
-- [ ] Identity (strong/weak scheme selection UI, §11/§26 custody — registration itself is now DAG-replicated, Appendix H.19, but the UI never lets a module declare/display which scheme it's using), AI (§28), presentation (§27.5)
+- [x] Identity (strong/weak scheme selection UI, §11/§26) — the issuing-module pathway is now actually reachable from the app, and each module's identityScheme is displayed with Lemma 1's reasoning attached (see changelog and whitepaper §27.2/Appendix H.23)
+- [ ] AI (§28); presentation (§27.5) — §11/§26 custody is now UI-reachable, see above
 
 ## Changelog
 
@@ -1377,3 +1378,30 @@ previous update to this README.)
     Appendix H.22.
   173 JS tests total (Rust unaffected — this pass was whitepaper +
   reward.js analysis only, no new production code).
+- Wired the identity-scheme selection (§11's Lemma 1, §27.2) into the
+  real app, not just displayed it. What was asked for turned out to be
+  smaller than what needed fixing first: `main.js`'s submission form
+  hardcoded `isIssuing: false` unconditionally, meaning
+  `selectIdentityScheme()`, the α≤1 rejection, and `identityScheme`
+  itself (already built and tested in `module-registry.js` since an
+  earlier phase) had no path from the real application at all — every
+  module submitted through the deployed app was silently forced
+  read-only, not merely undisplayed. Closed by adding the real
+  declaration fields to the Commit screen's submission form (an
+  issuing checkbox, a time-sensitivity checkbox, α, and a scarcity
+  policy), with `identityCostMechanism` deliberately NOT free text — it
+  is read from the submitting domain's own real materialized identity
+  state, so a module can't just claim a mechanism it doesn't actually
+  have. Each registered module's resulting `identityScheme` now shows
+  in the Domain screen's catalog as a labeled badge ("🔒 strong id" /
+  "🔓 weak id" / "non-issuing"), with Lemma 1's own reasoning attached
+  rather than a bare label. Verified end to end through the real
+  submission-event construction and registration call the app actually
+  makes, not only via `module-registry.js`'s own pre-existing unit
+  tests: an issuing module declaring α≤1 with no registered identity is
+  confirmed rejected with §24.1's exact reason string; the same
+  declaration with a real registered identity is confirmed accepted; a
+  time-sensitive declaration computes 'strong', an insensitive one
+  'weak'. New whitepaper §27.2 update and Appendix H.23. 173 JS tests
+  unaffected (this pass touched application wiring, not the already-
+  tested pure module-registry.js/module-submission.js logic).
