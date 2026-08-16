@@ -1,10 +1,20 @@
-// identity-flow.js — orchestrates the full identity-registration flow:
-// build/sign/broadcast a burn transaction, wait for finality, fetch and
-// normalize it, then verify and register it. This is the thin,
-// necessarily network-dependent composition layer on top of the pieces
-// that ARE independently tested: solana-wallet.js (real keypair/tx
-// construction, tested against the real @solana/web3.js) and
-// identity-cost.js (pure verification/registration, fully tested).
+// identity-flow.js — orchestrates the network half of identity
+// registration: build/sign/broadcast a burn transaction, wait for
+// finality, fetch and normalize it. This is the thin, necessarily
+// network-dependent composition layer on top of the pieces that ARE
+// independently tested: solana-wallet.js (real keypair/tx construction,
+// tested against the real @solana/web3.js) and identity-cost.js (pure
+// verification, fully tested).
+//
+// Deliberately does NOT touch any IdentityCostState anymore — an
+// earlier revision did, and registration lived in a standalone local
+// variable never folded from H_d, so two domains that reconciled after
+// a partition never actually learned about each other's registered
+// identities (found and fixed — see identity-cost-reducer.js). This
+// file's only job now is producing a verified (signature, tx) pair;
+// the caller is responsible for folding that into an 'identity-register'
+// DAG event, the same way every other durable fact in this project
+// becomes durable — by being an event, not a local variable.
 //
 // This file itself is NOT exercised in this development sandbox — it
 // requires a live Connection to a real Solana network (devnet or
@@ -15,23 +25,20 @@
 import { networkConfig, DEFAULT_NETWORK } from './solana-networks.js';
 import { broadcastBurnTransaction } from './solana-wallet.js';
 import { fetchNormalizedBurnTx } from './solana-rpc.js';
-import { registerIdentityCost } from './identity-cost.js';
+import { verifyBurnProof } from './identity-cost.js';
 
 /**
- * Burns `lamports` from `keypair` on `network`, waits for finality,
- * verifies the resulting transaction, and registers it as `domain`'s
- * identity cost. Throws on any failure (insufficient balance, RPC
- * error, verification failure) rather than silently returning a
- * half-completed result — a partially-failed identity registration
- * must never look like a successful one.
+ * Burns `lamports` from `keypair` on `network`, waits for finality, and
+ * verifies the resulting transaction. Throws on any failure (insufficient
+ * balance, RPC error, verification failure) rather than silently
+ * returning a half-completed result.
  *
  * @param {typeof import('@solana/web3.js')} solanaWeb3
  * @param {import('@solana/web3.js').Keypair} keypair
- * @param {import('./identity-cost.js').IdentityCostState} state
- * @param {{ domain: string, lamports: number, network?: keyof typeof import('./solana-networks.js').SOLANA_NETWORKS }} params
- * @returns {Promise<{ state: import('./identity-cost.js').IdentityCostState, signature: string }>}
+ * @param {{ lamports: number, network?: keyof typeof import('./solana-networks.js').SOLANA_NETWORKS }} params
+ * @returns {Promise<{ signature: string, burnedLamports: number }>}
  */
-export async function registerDomainViaBurn(solanaWeb3, keypair, state, { domain, lamports, network = DEFAULT_NETWORK }) {
+export async function broadcastAndVerifyBurn(solanaWeb3, keypair, { lamports, network = DEFAULT_NETWORK }) {
   const { rpcEndpoint } = networkConfig(network);
   const connection = new solanaWeb3.Connection(rpcEndpoint, 'finalized');
 
@@ -42,10 +49,10 @@ export async function registerDomainViaBurn(solanaWeb3, keypair, state, { domain
     throw new Error(`Burn transaction ${signature} was broadcast but could not be fetched back at 'finalized' commitment`);
   }
 
-  const result = registerIdentityCost(state, { domain, tx, minLamports: lamports });
-  if (!result.accepted) {
-    throw new Error(`Burn succeeded (${signature}) but registration was rejected: ${result.reason}`);
+  const check = verifyBurnProof(tx, { minLamports: lamports });
+  if (!check.valid) {
+    throw new Error(`Burn succeeded (${signature}) but did not verify: ${check.reason}`);
   }
 
-  return { state: result.state, signature };
+  return { signature, burnedLamports: tx.incineratorBalanceDeltaLamports };
 }
