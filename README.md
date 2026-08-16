@@ -1194,3 +1194,19 @@ previous update to this README.)
   comparison of WASM-backed vs. JS-backed computed results in the
   browser hasn't been run — only that the module loads cleanly has been
   confirmed.
+- Finished the second half of "how do plugins actually run" (the first
+  half, sending AIWA between domains via Conservation, landed earlier):
+  desktop icons are now real, clickable entry points. Added
+  `module-loader.js` (the "load to run" counterpart to `module-fetch.js`'s
+  "load to submit" — fetches a module's real code from its `codeUrl` and
+  verifies it against the registered `codeHash` before ever considering
+  it runnable; 3 new tests, including a fetch stub proving a code swap
+  behind the same URL is rejected, not silently run). Clicking a pinned
+  desktop icon now: fetches and verifies the real code, mounts it into
+  the real sandboxed iframe (`module-sandbox.js`'s already-built
+  `mountModule()`, wired for the first time), with `ctx.storage` scoped
+  per (domain, module), `ctx.toast` logged to the real event log, and
+  `ctx.commit`/`ctx.claim` calling the domain's real `commit()`/`claim()`
+  — a plugin can genuinely stake and claim on the domain's behalf, not a
+  simulated stand-in. A close button unmounts the iframe cleanly. 146
+  JS tests total.
