@@ -29,6 +29,11 @@
 // could be tested with a DOM-simulating environment (jsdom) in a
 // future pass; this file has not been exercised that way yet — treat
 // it as unverified until it's run in a real browser.
+//
+// theme-tokens.js's ThemeTokens (§27.5, "presentation independence") is
+// injected here — see buildSandboxHtml()'s own note on how.
+
+import { DEFAULT_THEME, themeToCssVariables } from '../presentation/theme-tokens.js';
 
 /**
  * Builds the sandboxed iframe's document: the module's verified code,
@@ -36,10 +41,19 @@
  * host via postMessage and resolves/rejects based on the host's
  * response. The module never sees `window.parent`, never sees the
  * host's real `window` — only this shim.
+ *
+ * `theme` (theme-tokens.js) is injected two ways, since a module might
+ * render via its own CSS (reads the `--aiwa-*` custom properties this
+ * function writes into `:root`) or entirely via JS (reads `ctx.theme`
+ * directly, the same token values as plain data). Neither is
+ * mandatory — a module that ignores both still runs; it simply isn't
+ * presentation-independent, which is an opt-in property per module,
+ * not something this project can enforce on code it doesn't control.
  */
-function buildSandboxHtml(moduleCode, moduleId) {
+export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens) {
   const escapedId = JSON.stringify(moduleId);
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><script>
+  const escapedTheme = JSON.stringify(themeTokens);
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${themeCss}</style></head><body><script>
 (function () {
   'use strict';
   var MODULE_ID = ${escapedId};
@@ -72,6 +86,7 @@ function buildSandboxHtml(moduleCode, moduleId) {
     toast: function (message, kind) { return callHost('toast', [message, kind]); },
     commit: function (amount) { return callHost('commit', [amount]); },
     claim: function () { return callHost('claim', []); },
+    theme: ${escapedTheme},
   };
 
   try {
@@ -94,6 +109,10 @@ function buildSandboxHtml(moduleCode, moduleId) {
  * @param {(code: string) => Promise<boolean>} verifyFn — injected for
  *   testability of the call shape; defaults to the real
  *   verifyModuleIntegrity from module-hash.js in production use.
+ * @param {import('../presentation/theme-tokens.js').ThemeTokens} theme —
+ *   defaults to theme-tokens.js's DEFAULT_THEME if omitted, so existing
+ *   callers that predate presentation independence keep working
+ *   unchanged.
  * @param {{
  *   onStorageGet: (moduleId: string, key: string) => Promise<string|null>,
  *   onStorageSet: (moduleId: string, key: string, value: string) => Promise<void>,
@@ -102,7 +121,7 @@ function buildSandboxHtml(moduleCode, moduleId) {
  *   onClaim: (moduleId: string) => Promise<number>,
  * }} hostHandlers
  */
-export async function mountModule(container, entry, code, verifyFn, hostHandlers) {
+export async function mountModule(container, entry, code, verifyFn, hostHandlers, theme = DEFAULT_THEME) {
   const ok = await verifyFn(code, entry.codeHash);
   if (!ok) {
     throw new Error(`Module '${entry.id}' failed integrity verification — fetched code does not match its registered hash. Refusing to mount.`);
@@ -114,7 +133,7 @@ export async function mountModule(container, entry, code, verifyFn, hostHandlers
   // that silently removes the sandbox — don't.
   iframe.setAttribute('sandbox', 'allow-scripts');
   iframe.style.cssText = 'width:100%;height:100%;border:0';
-  iframe.srcdoc = buildSandboxHtml(code, entry.id);
+  iframe.srcdoc = buildSandboxHtml(code, entry.id, themeToCssVariables(theme), theme);
 
   const onMessage = async (event) => {
     if (event.source !== iframe.contentWindow) return;
