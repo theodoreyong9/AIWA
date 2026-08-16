@@ -688,8 +688,10 @@ previous update to this README.)
 - [ ] Transport (pluggable layer, §25)
 - [x] Modules (§27): open registration, content-addressed code integrity, real iframe sandbox mechanism — 18 JS + 15 Rust tests; closes R19 in the security property registry from "unconfirmed" to "specified and implemented, not adversarially tested" (Appendix H.11)
 - [x] Modules: signed submission pipeline (`module-submission.js`/`module_submission.rs`) — real Ed25519 signing (JS: `@noble/curves`, Rust: `ed25519-dalek`), replay-guarded, hash-checked against actually-fetched code, no economic gate on publishing (by design); 17 new tests
-- [ ] Modules: the optional §24.3 ψ growth-condition symbolic check (deliberately out of scope, not required by the paper's own pseudocode); automated JS/Rust cross-language parity for the submission signing scheme (assumed correct by field-order matching, not yet verified by a parity script — see below, being addressed now)
-- [ ] Identity (strong/weak scheme selection UI, §11/§26 custody), AI (§28), presentation (§27.5), conservation-to-economics wiring (§6–7)
+- [x] Modules: automated JS/Rust cross-language parity for the submission signing scheme — `scripts/verify-submission-parity.sh`, both directions confirmed with real Ed25519 keys
+- [x] Modules: the optional §24.3 ψ growth-condition symbolic check (deliberately out of scope, not required by the paper's own pseudocode). `checkSubmissionEligibility()` is now wired into the real submission pipeline (was built and tested but unused — see changelog and whitepaper §27.4.1/Appendix H.20).
+- [x] Conservation-to-economics wiring (§6–7) — `claim-issue`/`transfer` DAG events, signed (Appendix H.16, H.18)
+- [ ] Identity (strong/weak scheme selection UI, §11/§26 custody — registration itself is now DAG-replicated, Appendix H.19, but the UI never lets a module declare/display which scheme it's using), AI (§28), presentation (§27.5)
 
 ## Changelog
 
@@ -1266,3 +1268,72 @@ previous update to this README.)
   recipient independently confirmed to own an active claim of 20. New
   whitepaper §7 and §26 security notes, Appendix H.18 and H.19. 155 JS
   / 120 Rust tests total (114 lib + 6 integration).
+- Wired `checkSubmissionEligibility()` into the real submission pipeline
+  — built and tested since an earlier phase, never actually called.
+  Injected into `submitModule()`/`submit_module()` as an optional
+  dependency (matching the existing `registerModuleFn` pattern) so the
+  pipeline itself stays free of any dependency on identity-cost or
+  cadence state; `main.js` supplies the closure, computing the author's
+  real current rank from their actual burn and cadence epoch. Gates
+  only a genuinely new module id, confirmed to never gate an update to
+  one the author already owns. Verified end to end, not just in
+  isolation: a real declining-rank second submission gets rejected with
+  the specific ratio in the message; an improved-rank submission
+  succeeds. 5 JS + 5 Rust new tests.
+  **A real bug found testing this end to end, not by inspection**: JS's
+  `recordNonce()` returned a fresh object containing only `usedNonces`
+  on every call, silently discarding every OTHER author's tracked rank
+  each time — invisible in every existing single-author test, only
+  caught once a two-author sequential test was written specifically for
+  this wiring. Fixed to preserve the rest of the state; a dedicated
+  regression test now exercises exactly this case. Rust's `&mut`-based
+  equivalent never had this failure mode at all, by the language's own
+  aliasing rules, not because it was separately checked — recorded as a
+  genuine language-level difference in this whitepaper's own appendix,
+  not glossed over as "both languages equally safe by default." New
+  whitepaper §27.4.1 update and Appendix H.20. 160 JS / 125 Rust tests
+  total.
+- **Made the reward formula immutable — a real fork risk closed, found
+  by one direct question.** θ's reward parameters used to be a plain,
+  freely-editable JS variable, never a DAG event — two domains could
+  silently disagree about what the exact same accrual event was worth,
+  simply from different values typed into Parameters. Closed with
+  `formula-registry-reducer.js` / `formula_registry_reducer.rs`: a
+  `formula-register` DAG event mints an id bound permanently to fixed
+  `(alpha, beta, gamma, C, minQ)` — no update path exists, ever; the
+  same id can never be re-minted with different parameters, matching
+  `§8.1`'s content-addressing discipline applied to an economic object
+  instead of an event. The real Proof-of-Will formula this project
+  adopted is now `'genesis'` — a fixed protocol default needing no
+  event or burn, specifically to avoid a bootstrapping paradox (a
+  domain needs some formula before it could ever afford to mint a new
+  one). Every other formula is a genuine mint, gated by a real
+  registered identity — same application-layer pattern as
+  `checkSubmissionEligibility`'s wiring, not a new mechanism. Which
+  formula a domain currently uses is a separate, local, non-permanent
+  choice from whether that formula exists and what it permanently is.
+  Verified directly: a mint registers with its real declared
+  parameters; the same id cannot be re-minted (exactly one of two
+  competing mints wins, deterministically, confirmed by folding twice
+  independently); `'genesis'` itself cannot be overwritten; two domains
+  minting independently converge to a registry containing both formulas
+  after reconciliation. 8 JS + 6 Rust tests.
+  **A real, functional near-miss found only by testing the actual
+  switch end to end, not by code review**: JS's minted-formula entries
+  are flat; Rust's nest the same fields under a `params` struct field
+  for its own good type-level reasons. `main.js`'s first
+  `currentRewardParams()` read `registry.formulas[id]?.params` —
+  correct for the Rust shape, silently `undefined` for the JS one — so
+  the `?? GENESIS_FORMULA_PARAMS` fallback fired on every single switch
+  to a minted formula. No crash, no visible error: the Parameters
+  screen's read-only display (a separate, already-correct code path)
+  would show the right numbers for whichever formula was selected,
+  while the actual reward computation underneath kept silently using
+  `genesis` regardless. Caught by an end-to-end check — mint, switch,
+  assert the computed balance under hand-verifiable parameters — which
+  produced the obviously-wrong unswitched value immediately, not a
+  subtly-off number easy to mistake for something else. Fixed to read
+  the flat shape directly; a dedicated regression test now asserts the
+  JS entry has no `.params` field, so this exact confusion fails loudly
+  if it's ever reintroduced. New whitepaper §10.1 and Appendix H.21.
+  168 JS / 131 Rust tests total (125 lib + 6 integration).
