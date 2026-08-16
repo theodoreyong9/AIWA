@@ -305,3 +305,116 @@ label.field-label {
 #plugin-runner-container iframe { width: 100%; height: 100%; border: 0; }
 
 ::selection { background: var(--accent-dim); color: var(--bg); }
+
+/* ══════════════════════════════════════════════════════════════════
+   Desktop (≥900px): a real control-panel layout, not a mobile app
+   stretched into empty space. Left sidebar replaces the bottom tab
+   bar; cards flow into a Swiss-grid of columns instead of a single
+   narrow stack; the plugin runner becomes a bounded floating panel
+   instead of a full-bleed sheet.
+   ══════════════════════════════════════════════════════════════════ */
+@media (min-width: 900px) {
+  body {
+    display: grid;
+    grid-template-columns: 14.5rem 1fr;
+    max-width: none;
+    margin: 0;
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  #app {
+    grid-column: 2;
+    max-width: 62rem;
+    width: 100%;
+    margin: 0 auto;
+    padding: 2.2rem 2.5rem 3rem;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    margin: 0 0 0.2rem;
+    letter-spacing: 0.03em;
+  }
+  #subtitle { font-size: 0.8rem; margin-bottom: 0.7rem; }
+  #status { font-size: 0.82rem; margin-bottom: 0.5rem; }
+  #my-domain-badge { display: inline-block; margin-bottom: 1.2rem; }
+
+  #no-wallet-notice { margin: 0 0 1.2rem; padding: 1rem 1.1rem; }
+
+  /* Only one .screen is ever .active at a time — this grid applies to
+     whichever screen is currently open, letting its own cards flow
+     into columns rather than a single narrow stack. */
+  .screen { padding: 0; }
+  .screen.active {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr));
+    gap: 1rem;
+    align-items: start;
+  }
+  .card { margin-bottom: 0; }
+
+  /* A handful of cards are meant to read as a single wide panel, not
+     a tile competing for column space — the event log and the
+     desktop-icons grid both want horizontal room. */
+  #screen-desktop .card:has(#desktop-icons),
+  #screen-parameters .card:has(#log-list) {
+    grid-column: 1 / -1;
+  }
+  #desktop-icons { grid-template-columns: repeat(8, minmax(0, 5.5rem)); justify-content: start; }
+
+  /* ── Sidebar nav, replacing the bottom tab bar ──────────────────── */
+  #bottom-nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: auto;
+    width: 14.5rem;
+    max-width: none;
+    margin: 0;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0.1rem;
+    border-top: none;
+    border-right: 1px solid var(--border);
+    padding: 1.4rem 0.7rem;
+  }
+  #bottom-nav::before {
+    content: 'AIWA';
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 0.85rem;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    padding: 0 0.6rem 1.2rem;
+    display: block;
+  }
+  .nav-btn {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 0.6rem;
+    font-size: 0.78rem;
+    padding: 0.55rem 0.6rem;
+    border-radius: var(--radius);
+    text-transform: none;
+    letter-spacing: 0.01em;
+  }
+  .nav-btn:hover { background: var(--surface-raised); color: var(--text); }
+  .nav-btn.active { background: var(--accent-bg); color: var(--accent); }
+  .nav-btn .nav-icon { font-size: 1rem; }
+
+  /* ── Plugin runner: a bounded floating panel, not a full-bleed sheet ── */
+  #plugin-runner {
+    padding: 6vh 12vw;
+    background: rgba(11, 13, 16, 0.86);
+  }
+  #plugin-runner-container { border-radius: var(--radius); }
+}
+
+@media (min-width: 1300px) {
+  #app { max-width: 74rem; }
+  .screen.active { grid-template-columns: repeat(auto-fit, minmax(23rem, 1fr)); }
+  #desktop-icons { grid-template-columns: repeat(10, minmax(0, 5.5rem)); }
+}
