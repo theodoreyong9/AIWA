@@ -692,7 +692,8 @@ previous update to this README.)
 - [x] Modules: the optional §24.3 ψ growth-condition symbolic check (deliberately out of scope, not required by the paper's own pseudocode). `checkSubmissionEligibility()` is now wired into the real submission pipeline (was built and tested but unused — see changelog and whitepaper §27.4.1/Appendix H.20).
 - [x] Conservation-to-economics wiring (§6–7) — `claim-issue`/`transfer` DAG events, signed (Appendix H.16, H.18)
 - [x] Identity (strong/weak scheme selection UI, §11/§26) — the issuing-module pathway is now actually reachable from the app, and each module's identityScheme is displayed with Lemma 1's reasoning attached (see changelog and whitepaper §27.2/Appendix H.23)
-- [ ] AI (§28); presentation (§27.5) — §11/§26 custody is now UI-reachable, see above
+- [x] Presentation (§27.5) — theme-tokens.js (two presets, one matching this section's own stated interplanetary case), injected into module-sandbox.js's iframe as real CSS variables and real ctx.theme data, wired into the app as a local, non-durable display preference. See changelog and Appendix H.26.
+- [ ] AI (§28) — deliberately deferred, not an oversight
 
 ## Changelog
 
@@ -1505,3 +1506,33 @@ previous update to this README.)
   has no network path to Solana — the same category of limitation as
   everything else in this file's honesty-about-untested-network-code
   discipline, not a gap to close with more code.
+- Built Presentation independence (§27.5) — the whitepaper already
+  claimed a presentation layer "cannot alter module behavior, only how
+  a module's output is displayed," but nothing backed that claim: zero
+  theming abstraction existed anywhere. `theme-tokens.js` is plain
+  design-token data (colors, font, spacing), not a framework — two
+  presets, `default` and `compact` (large monospace text, maximum
+  contrast, secondary text intentionally collapsed to the same value
+  as primary — matching the whitepaper's own stated case: a bandwidth-
+  or hardware-constrained settlement). Both presets confirmed to
+  declare the identical set of token keys, so a module written against
+  one can't silently break on a missing key under the other.
+  `themeToCssVariables()` confirmed to actually produce a real
+  `:root {}` CSS block containing every expected token, and confirmed
+  to genuinely differ between presets, not accidentally identical
+  output. `module-sandbox.js`'s `buildSandboxHtml()` (real code since
+  an earlier phase, per H.11, just never theme-aware) now injects the
+  active theme both ways the whitepaper promises: as real CSS custom
+  properties in a `<style>` tag, and as `ctx.theme` — the identical
+  token values as real, parseable JSON a module's own JS can read.
+  **Verified as a literal string-equality check, not just architectural
+  intent**: a module's own code is confirmed byte-identical across both
+  presets — only the injected presentation differs, which is the exact
+  claim §27.5 makes. Wired into the app: a Presentation selector in
+  Parameters switches a local `activeThemeId`, confirmed by reading the
+  actual listener to have exactly one side effect — reassigning that
+  variable and logging — touching `theta`, `myDomain`, the module
+  registry, or any other state in no way at all. New whitepaper §27.5
+  update and Appendix H.26. 12 new tests (8 + 4). 217 JS tests total —
+  the last item on this project's own open-work list before AI (§28,
+  deliberately deferred, not an oversight).
