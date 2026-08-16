@@ -36,6 +36,9 @@ import { materializeConservation, buildSignedTransferEvent } from '../core/conse
 import { createDelayTolerantTransport } from '../core/transport/delay-tolerant-transport.js';
 import { createConnectionWatchdog } from '../core/transport/connection-watchdog.js';
 import { materializeFormulas, GENESIS_FORMULA_ID, GENESIS_FORMULA_PARAMS } from '../core/economics/formula-registry-reducer.js';
+import { collectContextSnapshot, buildIdeaSystemPrompt, sanitizeIdeaReply } from '../core/ai/idea-agent.js';
+import { detectWebGpuSupport, loadEngine, streamChat } from '../core/ai/webllm-engine.js';
+import { materializePublicProfiles, publishedDataForDomain } from '../core/profile/public-profile-reducer.js';
 import { rankFromIdentityAndCadence, checkSubmissionEligibility, computeModuleRank } from '../core/modules/module-rank.js';
 import { computeModuleHash } from '../core/modules/module-hash.js';
 import { buildSubmissionEvent, validateSubmission, initialSubmissionState, recordNonce } from '../core/modules/module-submission.js';
@@ -90,15 +93,31 @@ function setLinkUp(a, b, up) {
  * queueing logic takes over — this file has no queueing logic of its
  * own to keep in sync with delay-tolerant-transport.js's.
  */
-async function simulatedNetworkSend(fromId, toId, _payload) {
+async function simulatedNetworkSend(fromId, toId, payload) {
   if (!isLinkUp(fromId, toId)) return false;
   const from = allDomains.get(fromId);
   const to = allDomains.get(toId);
   if (!from || !to) return false;
-  to.dag.merge(from.dag);
-  from.dag.merge(to.dag);
   to.watchdog.recordActivity();
   from.watchdog.recordActivity();
+
+  if (payload?.type === 'module-message') {
+    // Real-time, module-addressed — deliver the actual payload to the
+    // recipient's inbound dispatcher, not a DAG merge. If no module (or
+    // a different one) is mounted there right now, the message is
+    // simply not seen — there is no inbound queue on the receiving
+    // side, matching real-time interaction semantics, not durable
+    // delivery (§25's delay-tolerant transport still guarantees the
+    // OUTER send() itself was queued if the link was down; what
+    // happens once delivered is this app's own dispatch policy).
+    to.handleInboundModuleMessage?.(fromId, payload.moduleId, payload.data);
+    return true;
+  }
+
+  // Default: a sync-request, or any other payload — the existing
+  // behavior, a real reconciliation merge.
+  to.dag.merge(from.dag);
+  from.dag.merge(to.dag);
   return true;
 }
 
@@ -234,7 +253,21 @@ class DomainReplica {
     this.lastEventId = newId;
   }
   materializeModules() { return materializeModuleRegistry(this.dag.topoOrder()); }
+  /** Called by simulatedNetworkSend() when a real-time module message arrives — delivers to the currently-mounted module iframe only if this IS the domain whose UI has it open and it's the exact same module id. No inbound queue: real-time interaction, not durable delivery. */
+  handleInboundModuleMessage(fromId, moduleId, data) {
+    if (this === myDomain && activePluginModuleId === moduleId && activePluginHandle) {
+      activePluginHandle.deliverPeerMessage(fromId, data);
+    }
+  }
+
   async materializeConservation() { return materializeConservation(this.dag.topoOrder()); }
+  materializePublicProfiles() { return materializePublicProfiles(this.dag.topoOrder()); }
+
+  /** Publishes (or, with value=null, retracts) one key of a module's public data — a real DAG event, propagated by merge() like everything else. */
+  async publishModuleData(moduleId, key, value) {
+    const id = await this.dag.addEvent([this.lastEventId], { type: 'module-data-published', domain: this.id, moduleId, key, value, at: this.epoch });
+    this.lastEventId = id;
+  }
   materializeIdentity() { return materializeIdentity(this.dag.topoOrder()); }
 
   /**
@@ -266,7 +299,8 @@ let myDomain = null; // the one real domain this app instance represents — nul
 let testPeers = new Map(); // id -> DomainReplica, testing-only, never the primary UI concept
 let submissionState = initialSubmissionState();
 let solanaWeb3 = null;
-let activePluginHandle = null; // { unmount } from mountModule(), or null
+let activePluginHandle = null; // { unmount, deliverPeerMessage } from mountModule(), or null
+let activePluginModuleId = null; // which module id is currently mounted — lets an inbound peer message find its way in
 const MODULE_STORAGE_PREFIX = 'aiwa-module-storage-';
 
 function currentNetwork() { return document.getElementById('network-select').value || DEFAULT_NETWORK; }
@@ -448,9 +482,19 @@ async function runModule(entry) {
       await renderAll();
       return n;
     },
+    async onShare(moduleId, key, value) {
+      await myDomain.publishModuleData(moduleId, key, value);
+      log(`[plugin:${moduleId}] ${value === null ? 'retracted' : 'published'} '${key}'`);
+    },
+    async onSendToPeer(moduleId, peerId, data) {
+      const delivered = await myDomain.transport.send(peerId, { type: 'module-message', moduleId, data });
+      if (!delivered) log(`[plugin:${moduleId}] message to '${peerId}' queued — simulated link is down`);
+      return delivered;
+    },
   };
 
   activePluginHandle = await mountModule(containerEl, entry, code, verifyModuleIntegrity, hostHandlers, getTheme(activeThemeId));
+  activePluginModuleId = entry.id; // so an inbound transport message tagged for this module id can find its way in — see wireInboundModuleMessages()
   log(`[${myDomain.id}] running '${entry.id}' in a sandboxed iframe`);
 }
 
@@ -459,6 +503,7 @@ function stopActiveModule() {
     activePluginHandle.unmount();
     activePluginHandle = null;
   }
+  activePluginModuleId = null;
   document.getElementById('plugin-runner').classList.add('plugin-runner-hidden');
 }
 
@@ -518,6 +563,12 @@ function renderDomainScreen() {
   const gState = myDomain.materialize();
   const registry = myDomain.materializeModules();
   const localIdentityState = myDomain.materializeIdentity();
+
+  const ideaSnapshot = collectContextSnapshot(registry, myDomain.id, realContactIds());
+  const contactCount = Object.keys(ideaSnapshot.contactModules).length;
+  document.getElementById('idea-network-info').textContent =
+    `Sees: ${ideaSnapshot.myModules.length} of your modules, ${contactCount} contact${contactCount === 1 ? '' : 's'} with registered modules.`;
+
   const pinned = new Set(pinnedIds(myDomain.id));
   const modules = Object.values(registry.modules).map((m) => ({
     ...m,
@@ -594,7 +645,25 @@ function renderContactsScreen() {
         <input type="number" min="1" step="1" placeholder="amount" class="send-amount-input" style="flex:1">
         <button class="send-aiwa-btn" style="flex:0 0 auto">Send AIWA</button>
       </div>
-      <p class="msg send-msg"></p>`;
+      <p class="msg send-msg"></p>
+      <button class="visit-profile-btn full-btn" style="margin-top:0.3rem">👤 Visit profile</button>
+      <div class="visit-profile-panel" style="display:none;margin-top:0.4rem;font-size:0.78rem"></div>`;
+    row.querySelector('.visit-profile-btn').addEventListener('click', () => {
+      const panel = row.querySelector('.visit-profile-panel');
+      const isOpen = panel.style.display !== 'none';
+      panel.style.display = isOpen ? 'none' : 'block';
+      if (isOpen) return;
+      const published = publishedDataForDomain(myDomain.materializePublicProfiles(), d);
+      const moduleIds = Object.keys(published);
+      if (moduleIds.length === 0) {
+        panel.innerHTML = '<p class="hint">This domain has published nothing publicly (§27.2/hyperprofile) — or you have not reconciled with it recently enough to see it.</p>';
+        return;
+      }
+      panel.innerHTML = moduleIds.map((moduleId) => {
+        const entries = Object.entries(published[moduleId]).map(([key, { value }]) => `<div class="stat-row"><span>${key}</span><span>${typeof value === 'object' ? JSON.stringify(value) : String(value)}</span></div>`).join('');
+        return `<div style="margin-bottom:0.3rem"><strong>${moduleId}</strong>${entries}</div>`;
+      }).join('');
+    });
     row.querySelector('input[data-domain]').addEventListener('change', (e) => setContactDelay(d, parseFloat(e.target.value) || 0));
     row.querySelector('.send-aiwa-btn').addEventListener('click', async () => {
       const amountInput = row.querySelector('.send-amount-input');
@@ -740,6 +809,65 @@ async function flushPendingSync() {
 
 // ── Submission ────────────────────────────────────────────────────
 
+// ── AI idea agent (§28, deliberately scoped to only this) ───────────
+// No cancel-mid-generation path exists yet — the streamChat generator
+// itself supports an injected stop signal (webllm-engine.js), but
+// nothing in this UI currently produces one. Recorded as an honest gap
+// rather than left as inert, never-called scaffolding.
+
+function realContactIds() {
+  if (!myDomain) return [];
+  const state = myDomain.materialize();
+  return Object.keys(state.cadence.domains).filter((d) => d !== myDomain.id);
+}
+
+async function requestModuleIdea() {
+  if (!myDomain) return;
+  const btn = document.getElementById('idea-btn');
+  const resultEl = document.getElementById('idea-result');
+  const msgEl = document.getElementById('idea-msg');
+  btn.disabled = true;
+  msgEl.textContent = '';
+  resultEl.textContent = '';
+
+  try {
+    msgEl.textContent = 'Checking on-device AI support…';
+    const support = await detectWebGpuSupport();
+    if (!support.supported) {
+      msgEl.textContent = `❌ ${support.reason}`;
+      msgEl.className = 'msg error';
+      return;
+    }
+
+    const registry = myDomain.materializeModules();
+    const snapshot = collectContextSnapshot(registry, myDomain.id, realContactIds());
+    const systemPrompt = buildIdeaSystemPrompt(snapshot);
+
+    msgEl.textContent = 'Loading on-device model — first run downloads it, later runs reuse it…';
+    const engine = await loadEngine((p) => { msgEl.textContent = `Loading model: ${Math.round((p.progress ?? 0) * 100)}% — ${p.text ?? ''}`; });
+
+    msgEl.textContent = 'Thinking…';
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: 'Suggest one module idea based on what you see in this network.' },
+    ];
+    let full = '';
+    for await (const chunk of streamChat(engine, support.model, messages, 280)) {
+      full += chunk;
+      resultEl.textContent = full;
+    }
+    full = sanitizeIdeaReply(full);
+    resultEl.textContent = full || '(no response — try again)';
+    msgEl.textContent = '';
+  } catch (err) {
+    msgEl.textContent = `❌ ${err.message}`;
+    msgEl.className = 'msg error';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+
 async function submitPluginCode() {
   if (!myDomain) return setMsg('submit-msg', 'Create a wallet first (Parameters).', 'error');
   const moduleId = document.getElementById('submit-id').value.trim();
@@ -825,6 +953,7 @@ async function main() {
 
   document.getElementById('burn-btn').addEventListener('click', registerIdentityViaBurn);
   document.getElementById('submit-btn').addEventListener('click', submitPluginCode);
+  document.getElementById('idea-btn').addEventListener('click', requestModuleIdea);
   document.getElementById('submit-issuing').addEventListener('change', (e) => {
     document.getElementById('issuing-fields').style.display = e.target.checked ? 'block' : 'none';
   });
