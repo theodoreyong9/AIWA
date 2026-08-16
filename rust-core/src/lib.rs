@@ -8,7 +8,7 @@ mod modules;
 
 pub use conservation::{
     apply_conservation_event, identity_derivation, materialize_conservation, Claim, ClaimStatus,
-    ConservationError, ConservationState, DerivationFn, Proof,
+    ConservationBridgeState, ConservationError, ConservationState, DerivationFn, Proof,
 };
 pub use core::EventDagCore;
 pub use dag::EventDag;
@@ -19,6 +19,7 @@ pub use economics::{
 };
 pub use event::Event;
 pub use identity::{
+    apply_identity_event, derive_domain_id, materialize_identity, short_domain_label,
     verify_burn_proof, Commitment, IdentityCostState, NormalizedBurnTx, RegisterResult,
     RegisteredIdentity, VerifyResult, SOLANA_INCINERATOR_ADDRESS,
 };
