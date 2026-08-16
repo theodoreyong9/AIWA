@@ -1337,3 +1337,43 @@ previous update to this README.)
   JS entry has no `.params` field, so this exact confusion fails loudly
   if it's ever reintroduced. New whitepaper §10.1 and Appendix H.21.
   168 JS / 131 Rust tests total (125 lib + 6 integration).
+- Addressed an external critique of the whitepaper point by point,
+  checking each claim against the current state rather than assuming.
+  1 of 6 points was already resolved (`checkSubmissionEligibility`
+  wiring), and 1 partially resolved but stale (§17's Claim-Evidence-
+  Assumption Matrix existed but was still labeled "Status in v1.1" —
+  updated to reflect everything built since, including new rows for
+  the Proof-of-Will formula's cross-language parity, signed-transfer
+  forgery fix, identity-cost DAG replication, formula immutability,
+  Conservation wiring, and confirmed WASM browser loading). The
+  remaining 3 points were real, substantive gaps, now closed:
+  - **New whitepaper §9.2, "The Consensus Contract"**: compiles what
+    was scattered across §8.1/§9.1/Appendix H into one honest account
+    of what's actually protocol-normative today versus merely "both
+    reference implementations happen to agree" — canonical event
+    encoding (closed as fact, open as spec), canonical parent ordering
+    (fully closed — confirmed both languages sort parent ids before
+    hashing), canonical topological ordering (same status as encoding),
+    numeric/float semantics (newly named as open, not previously
+    tracked), versioning (not specified at all), and normative test
+    vectors (exist, not yet elevated to conformance-suite status).
+  - **§24.1's Sybil-profit analysis re-derived against the actual
+    current reference formula**, not left as a flagged conjecture.
+    Two results, both proved and numerically verified (not asserted):
+    (1) capital-splitting is exactly reward-neutral before identity
+    cost under the current formula's linear b-term — stronger than the
+    old power-law form's conditional result, since any c_id > 0 now
+    makes N*=1 optimal unconditionally, for any α/β/γ/T; (2) a
+    genuinely new attack shape found while checking (1)'s own
+    robustness: because reward decays with a domain's own age (a term
+    the old formula never had), an attacker can sometimes profit from
+    abandoning an aged domain and re-splitting capital across fresh
+    young ones instead — "identity churn," confirmed numerically to
+    exceed identity cost for a real parameter case, left open rather
+    than resolved. New `tests/sybil-reward-splitting.test.mjs` (5
+    tests) backs both results permanently, including across multiple
+    parameter sets, not only the single worked example in the
+    whitepaper's prose. New whitepaper §10.1/§24.1 updates and
+    Appendix H.22.
+  173 JS tests total (Rust unaffected — this pass was whitepaper +
+  reward.js analysis only, no new production code).
