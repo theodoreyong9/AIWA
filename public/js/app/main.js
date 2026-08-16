@@ -24,12 +24,14 @@
 
 import { createLedger } from '../core/ledger-bridge.js';
 import { materializeG } from '../core/economics/g.js';
+import { deriveDomainId, shortDomainLabel } from '../core/identity/domain-id.js';
 import { loadSolanaWeb3, generateKeypair, keypairFromSecretKey, encryptSecretKey, decryptSecretKey } from '../core/identity/solana-wallet.js';
-import { registerDomainViaBurn } from '../core/identity/identity-flow.js';
-import { initialIdentityCostState, hasIdentityCost } from '../core/identity/identity-cost.js';
+import { broadcastAndVerifyBurn } from '../core/identity/identity-flow.js';
+import { hasIdentityCost } from '../core/identity/identity-cost.js';
+import { materializeIdentity } from '../core/identity/identity-cost-reducer.js';
 import { SOLANA_NETWORKS, DEFAULT_NETWORK } from '../core/identity/solana-networks.js';
 import { materializeModuleRegistry } from '../core/modules/module-registry-reducer.js';
-import { materializeConservation } from '../core/conservation/conservation-bridge.js';
+import { materializeConservation, buildSignedTransferEvent } from '../core/conservation/conservation-bridge.js';
 import { rankFromIdentityAndCadence } from '../core/modules/module-rank.js';
 import { computeModuleHash } from '../core/modules/module-hash.js';
 import { buildSubmissionEvent, validateSubmission, initialSubmissionState, recordNonce } from '../core/modules/module-submission.js';
@@ -42,12 +44,10 @@ const DESKTOP_PIN_PREFIX = 'aiwa-desktop-pins-';
 const CONTACT_DELAY_PREFIX = 'aiwa-contact-delay-';
 
 // ── Domain identity: derived from a wallet's public key, never typed ─
-
-async function deriveDomainId(publicKeyBytes) {
-  const digest = await crypto.subtle.digest('SHA-256', publicKeyBytes);
-  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  return hex.slice(0, 12); // short, stable, deterministic — not chosen
-}
+// (deriveDomainId itself now lives in domain-id.js, shared with
+// conservation-bridge.js's transfer-signature verification — see that
+// file's header for why having two copies of this is exactly the kind
+// of drift that silently breaks signature checks.)
 
 // ── Domain replica ──────────────────────────────────────────────────
 
@@ -107,19 +107,25 @@ class DomainReplica {
 
   materialize() { return materializeG(theta, this.dag.topoOrder()); }
   materializeModules() { return materializeModuleRegistry(this.dag.topoOrder()); }
-  materializeConservation() { return materializeConservation(this.dag.topoOrder()); }
+  async materializeConservation() { return materializeConservation(this.dag.topoOrder()); }
+  materializeIdentity() { return materializeIdentity(this.dag.topoOrder()); }
 
   /**
    * Sends `amount` of the domain's own accrued balance to `toDomainId`:
    * a real claim-issue (debits the balance, creates a spendable claim)
-   * followed by a real transfer (Deactivate→Prove→Verify→Consume→
-   * Activate, §6.1/§7) folded as DAG events, propagated by merge() like
-   * everything else — not a special-cased "send" mechanism.
+   * followed by a REAL SIGNED transfer — the transfer event now carries
+   * an Ed25519 signature over (claimId, from, to, nonce, timestamp)
+   * proving this domain's keypair actually authorized it, closing the
+   * forgeable-string-comparison gap conservation-bridge.js used to have.
    */
   async sendAiwa(toDomainId, amount) {
+    if (!this.keypair) throw new Error('a wallet is required to send AIWA — a transfer must be signed');
     const claimId = `claim-${this.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     let id = await this.dag.addEvent([this.lastEventId], { type: 'claim-issue', domain: this.id, id: claimId, amount });
-    id = await this.dag.addEvent([id], { type: 'transfer', claimId, from: this.id, to: toDomainId });
+    const seed = this.keypair.secretKey.slice(0, 32);
+    const pubkeyBytes = this.keypair.publicKey.toBytes();
+    const transferEvent = buildSignedTransferEvent({ claimId, from: this.id, to: toDomainId }, seed, pubkeyBytes);
+    id = await this.dag.addEvent([id], { type: 'transfer', ...transferEvent });
     this.lastEventId = id;
     return claimId;
   }
@@ -130,7 +136,6 @@ class DomainReplica {
 let theta = { reward: { alpha: 1.1, beta: 2.2, gamma: 3, C: 33 ** 3, minQ: 1 }, budgets: {} };
 let myDomain = null; // the one real domain this app instance represents — null until a wallet exists
 let testPeers = new Map(); // id -> DomainReplica, testing-only, never the primary UI concept
-let identityState = initialIdentityCostState();
 let submissionState = initialSubmissionState();
 let solanaWeb3 = null;
 let activePluginHandle = null; // { unmount } from mountModule(), or null
@@ -226,14 +231,21 @@ async function registerIdentityViaBurn() {
   const web3 = await ensureSolanaWeb3();
   setMsg('burn-msg', 'Broadcasting burn transaction…');
   try {
-    const result = await registerDomainViaBurn(web3, myDomain.keypair, identityState, { domain: myDomain.id, lamports, network });
-    identityState = result.state;
+    const result = await broadcastAndVerifyBurn(web3, myDomain.keypair, { lamports, network });
+    // The verified burn becomes an 'identity-register' DAG event, folded
+    // like everything else — propagated by merge(), not trapped in a
+    // local variable (see identity-cost-reducer.js's header for why
+    // that used to be a real problem).
+    const id = await myDomain.dag.addEvent([myDomain.lastEventId], {
+      type: 'identity-register', domain: myDomain.id, signature: result.signature, burnedLamports: result.burnedLamports, at: myDomain.epoch,
+    });
+    myDomain.lastEventId = id;
     setMsg('burn-msg', `✅ Registered — tx ${result.signature.slice(0, 12)}…`, 'success');
     log(`[${myDomain.id}] identity registered via SOL burn — tx ${result.signature}`);
   } catch (err) {
     setMsg('burn-msg', `❌ ${err.message}`, 'error');
   }
-  renderAll();
+  await renderAll();
 }
 
 // ── Screen navigation ────────────────────────────────────────────────
@@ -292,16 +304,16 @@ async function runModule(entry) {
       statusEl.className = `hint ${kind === 'error' ? 'error' : ''}`;
     },
     async onCommit(moduleId, amount) {
-      if (!hasIdentityCost(identityState, myDomain.id)) throw new Error('domain has no registered identity — cannot commit');
+      if (!hasIdentityCost(myDomain.materializeIdentity(), myDomain.id)) throw new Error('domain has no registered identity — cannot commit');
       if (!Number.isFinite(amount) || amount <= 0) throw new Error('commit amount must be a positive number');
       myDomain.commit(amount, 0);
       log(`[plugin:${moduleId}] committed b=${amount} on behalf of ${myDomain.id}`);
-      renderAll();
+      await renderAll();
     },
     async onClaim(moduleId) {
       const n = await myDomain.claim();
       log(`[plugin:${moduleId}] claimed ${n} commitment(s) on behalf of ${myDomain.id}`);
-      renderAll();
+      await renderAll();
       return n;
     },
   };
@@ -320,7 +332,7 @@ function stopActiveModule() {
 
 // ── Renderers ─────────────────────────────────────────────────────
 
-function renderDesktop() {
+async function renderDesktop() {
   const noWalletEl = document.getElementById('no-wallet-notice');
   const badgeEl = document.getElementById('my-domain-badge');
   if (!myDomain) {
@@ -330,23 +342,24 @@ function renderDesktop() {
   }
   noWalletEl.style.display = 'none';
   badgeEl.style.display = 'block';
-  document.getElementById('my-domain-id').textContent = myDomain.id;
+  document.getElementById('my-domain-id').textContent = shortDomainLabel(myDomain.id);
 
   const gState = myDomain.materialize();
-  document.getElementById('desktop-title').textContent = `Desktop — ${myDomain.id}`;
+  document.getElementById('desktop-title').textContent = `Desktop — ${shortDomainLabel(myDomain.id)}`;
   document.getElementById('d-epoch').textContent = gState.cadence.domains[myDomain.id]?.epoch ?? 0;
   document.getElementById('d-balance').textContent = gState.balances[myDomain.id] ?? 0;
 
-  const conState = myDomain.materializeConservation();
-  const ownedClaims = Object.values(conState.claims).filter((c) => c.owner === myDomain.id && c.status === 'active');
+  const conState = await myDomain.materializeConservation();
+  const ownedClaims = Object.values(conState.conservation.claims).filter((c) => c.owner === myDomain.id && c.status === 'active');
   const claimsTotal = ownedClaims.reduce((sum, c) => sum + c.amount, 0);
   document.getElementById('d-claims').textContent = `${claimsTotal} (${ownedClaims.length} claim${ownedClaims.length === 1 ? '' : 's'})`;
 
   const registry = myDomain.materializeModules();
+  const localIdentityState = myDomain.materializeIdentity();
   const pinned = new Set(pinnedIds(myDomain.id));
   const pinnedModules = Object.values(registry.modules)
     .filter((m) => pinned.has(m.id))
-    .map((m) => ({ ...m, rank: rankFromIdentityAndCadence(identityState, gState.cadence, m.author, theta.reward) }))
+    .map((m) => ({ ...m, rank: rankFromIdentityAndCadence(localIdentityState, gState.cadence, m.author, theta.reward) }))
     .sort((a, b) => b.rank - a.rank);
 
   const iconsEl = document.getElementById('desktop-icons');
@@ -372,10 +385,11 @@ function renderDomainScreen() {
   if (!myDomain) return;
   const gState = myDomain.materialize();
   const registry = myDomain.materializeModules();
+  const localIdentityState = myDomain.materializeIdentity();
   const pinned = new Set(pinnedIds(myDomain.id));
   const modules = Object.values(registry.modules).map((m) => ({
     ...m,
-    rank: rankFromIdentityAndCadence(identityState, gState.cadence, m.author, theta.reward),
+    rank: rankFromIdentityAndCadence(localIdentityState, gState.cadence, m.author, theta.reward),
   })).sort((a, b) => b.rank - a.rank);
 
   const listEl = document.getElementById('catalog-list');
@@ -392,16 +406,17 @@ function renderDomainScreen() {
     row.className = 'catalog-row';
     const isPinned = pinned.has(m.id);
     row.innerHTML = `<div class="catalog-icon">${m.icon || '⬡'}</div><div class="catalog-info"><div class="catalog-name">${m.name}</div><div class="catalog-meta">rank ${m.rank.toFixed(2)} · ${m.auditStatus}</div></div><button data-id="${m.id}">${isPinned ? '− Remove' : '+ Add'}</button>`;
-    row.querySelector('button').addEventListener('click', () => { togglePin(myDomain.id, m.id); renderAll(); });
+    row.querySelector('button').addEventListener('click', async () => { togglePin(myDomain.id, m.id); await renderAll(); });
     listEl.appendChild(row);
   }
 }
 
 function renderProfileScreen() {
   if (!myDomain) return;
-  const registered = hasIdentityCost(identityState, myDomain.id);
+  const localIdentityState = myDomain.materializeIdentity();
+  const registered = hasIdentityCost(localIdentityState, myDomain.id);
   document.getElementById('profile-identity-status').textContent = registered
-    ? `✅ registered — burned ${identityState.registered[myDomain.id].burnedLamports} lamports`
+    ? `✅ registered — burned ${localIdentityState.registered[myDomain.id].burnedLamports} lamports`
     : '🔓 wallet ready, not registered';
   document.getElementById('profile-network').textContent = currentNetwork();
 
@@ -421,7 +436,7 @@ function renderProfileScreen() {
 
 function renderCommitScreen() {
   if (!myDomain) return;
-  document.getElementById('burn-btn').disabled = hasIdentityCost(identityState, myDomain.id);
+  document.getElementById('burn-btn').disabled = hasIdentityCost(myDomain.materializeIdentity(), myDomain.id);
 }
 
 function renderContactsScreen() {
@@ -441,7 +456,7 @@ function renderContactsScreen() {
   for (const d of others) {
     const row = document.createElement('div');
     row.className = 'contact-row';
-    row.innerHTML = `<div class="contact-hash">${d}</div><div class="contact-delay">epoch ${state.cadence.domains[d].epoch} · delay: <input type="number" min="0" step="1" value="${contactDelay(d)}" style="width:4rem;display:inline-block" data-domain="${d}"> min</div>
+    row.innerHTML = `<div class="contact-hash" title="${d}">${shortDomainLabel(d)}…</div><div class="contact-delay">epoch ${state.cadence.domains[d].epoch} · delay: <input type="number" min="0" step="1" value="${contactDelay(d)}" style="width:4rem;display:inline-block" data-domain="${d}"> min</div>
       <div class="row" style="margin-top:0.3rem">
         <input type="number" min="1" step="1" placeholder="amount" class="send-amount-input" style="flex:1">
         <button class="send-aiwa-btn" style="flex:0 0 auto">Send AIWA</button>
@@ -467,7 +482,7 @@ function renderContactsScreen() {
       msgEl.textContent = `✅ Sent — claim ${claimId.slice(0, 16)}…`;
       msgEl.className = 'msg success';
       log(`[${myDomain.id}] sent ${amount} AIWA to ${d} (claim ${claimId})`);
-      renderAll();
+      await renderAll();
     });
     listEl.appendChild(row);
   }
@@ -489,7 +504,7 @@ function renderParametersScreen() {
   document.getElementById('param-minQ').value = theta.reward.minQ;
 
   if (myDomain) {
-    const registered = hasIdentityCost(identityState, myDomain.id);
+    const registered = hasIdentityCost(myDomain.materializeIdentity(), myDomain.id);
     document.getElementById('c-pending').textContent = myDomain.pending.length;
     document.getElementById('commit-action-btn').disabled = !registered;
     document.getElementById('claim-btn').disabled = !registered;
@@ -509,8 +524,8 @@ function renderParametersScreen() {
   document.getElementById('reconcile-btn').disabled = testPeers.size === 0 || !myDomain;
 }
 
-function renderAll() {
-  renderDesktop();
+async function renderAll() {
+  await renderDesktop();
   renderDomainScreen();
   renderProfileScreen();
   renderCommitScreen();
@@ -529,7 +544,7 @@ async function createTestPeer() {
   theta = { ...theta, budgets: { ...theta.budgets, [id]: null } };
   testPeers.set(id, replica);
   log(`Test peer '${id}' created (testing only — not part of the real protocol).`);
-  renderAll();
+  await renderAll();
 }
 
 async function reconcileWithTestPeer(peerId) {
@@ -543,7 +558,7 @@ async function reconcileWithTestPeer(peerId) {
   const converged = mineFromMine === mineFromPeer;
   log(`Reconciled with test peer '${peerId}' (${myDomain.dag.size} events on both sides now).`);
   log(converged ? 'Convergence check passed: both replicas agree (§9).' : 'Convergence check FAILED — bug.');
-  renderAll();
+  await renderAll();
 }
 
 // ── Submission ────────────────────────────────────────────────────
@@ -575,7 +590,7 @@ async function submitPluginCode() {
   await myDomain.foldSubmission(event, Boolean(existing));
   setMsg('submit-msg', `✅ ${existing ? 'Updated' : 'Registered'} '${moduleId}' — hash verified for real, signature verified for real.`, 'success');
   log(`[${myDomain.id}] plugin '${moduleId}' ${existing ? 'updated' : 'submitted'} via signed pipeline`);
-  renderAll();
+  await renderAll();
 }
 
 // ── Boot ──────────────────────────────────────────────────────────
@@ -591,25 +606,25 @@ async function main() {
   document.getElementById('advance-btn').addEventListener('click', async () => {
     if (!myDomain) return;
     await myDomain.advanceCadence();
-    renderAll();
+    await renderAll();
   });
 
   document.getElementById('burn-btn').addEventListener('click', registerIdentityViaBurn);
   document.getElementById('submit-btn').addEventListener('click', submitPluginCode);
   document.getElementById('plugin-runner-close').addEventListener('click', stopActiveModule);
 
-  document.getElementById('commit-action-btn').addEventListener('click', () => {
+  document.getElementById('commit-action-btn').addEventListener('click', async () => {
     if (!myDomain) return;
     const T = parseFloat(document.getElementById('patience-rate').value) || 0;
     myDomain.commit(10, T);
     log(`[${myDomain.id}] staked claim b=10 at q0=${myDomain.epoch}, T=${T}`);
-    renderAll();
+    await renderAll();
   });
   document.getElementById('claim-btn').addEventListener('click', async () => {
     if (!myDomain) return;
     const n = await myDomain.claim();
     log(n > 0 ? `[${myDomain.id}] claimed ${n} commitment(s).` : `[${myDomain.id}] nothing to claim.`);
-    renderAll();
+    await renderAll();
   });
 
   document.getElementById('wallet-create-btn').addEventListener('click', async () => {
@@ -618,7 +633,7 @@ async function main() {
     await createWalletAndDomain(pw);
     setMsg('wallet-msg', `Wallet created — domain id: ${myDomain.id}`, 'success');
     log(`Wallet created — domain id ${myDomain.id}`);
-    renderAll();
+    await renderAll();
   });
   document.getElementById('wallet-unlock-btn').addEventListener('click', async () => {
     const pw = document.getElementById('wallet-pw').value;
@@ -629,14 +644,14 @@ async function main() {
     } catch (err) {
       setMsg('wallet-msg', `❌ ${err.message}`, 'error');
     }
-    renderAll();
+    await renderAll();
   });
 
   document.getElementById('network-select').addEventListener('change', renderAll);
   document.getElementById('contacts-search').addEventListener('input', renderContactsScreen);
 
   ['param-alpha', 'param-beta', 'param-gamma', 'param-C', 'param-minQ'].forEach((id) => {
-    document.getElementById(id).addEventListener('change', () => {
+    document.getElementById(id).addEventListener('change', async () => {
       theta = {
         ...theta,
         reward: {
@@ -647,7 +662,7 @@ async function main() {
           minQ: parseFloat(document.getElementById('param-minQ').value) || 0,
         },
       };
-      renderAll();
+      await renderAll();
     });
   });
 
@@ -657,7 +672,7 @@ async function main() {
     if (target) reconcileWithTestPeer(target);
   });
 
-  renderAll();
+  await renderAll();
   document.getElementById('status').textContent = 'Ready — create or unlock a wallet to begin.';
 }
 
