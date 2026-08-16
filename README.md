@@ -685,7 +685,7 @@ previous update to this README.)
 - [x] **Security**: `transfer` events now require a real Ed25519 signature proving control of the `from` domain, closing a forgery vulnerability where ownership was checked by string comparison alone. See whitepaper §7/Appendix H.18.
 - [x] Identity cost is now a materialized view over H_d (`identity-register` DAG events), not a standalone local variable — closes the exact "where do these live, this looks critical for interplanetary deployment" gap. See whitepaper §26/Appendix H.19.
 - [x] The real compiled `.wasm` binary, loaded in an actual deployed browser session — confirmed loading with zero errors (only an unrelated favicon 404 remained). CI now builds and commits this binary automatically (`ci.yml`'s `wasm-build` job); getting there required finding and fixing three separate, real CI failures (a lost executable bit from a web-UI re-upload, a stale root `.gitignore` rule, and — the one that actually mattered — a `.gitignore` `wasm-pack` silently regenerates *inside its own output directory* on every single build, defeating the repo's own `.gitignore` regardless of what it says). What's still open: a live, in-browser side-by-side comparison of WASM-backed vs. JS-backed computed results — the shape-parity tests give strong reason to expect agreement, but that specific comparison hasn't been run.
-- [ ] Transport (pluggable layer, §25)
+- [x] Transport (pluggable layer, §25) — interface, delay-tolerant store-and-forward backend, and connection watchdog built and tested (21 tests, Appendix H.24). The WebRTC mesh backend remains an honest, explicit stub — real signaling infrastructure and real peers aren't available in this environment to verify it against.
 - [x] Modules (§27): open registration, content-addressed code integrity, real iframe sandbox mechanism — 18 JS + 15 Rust tests; closes R19 in the security property registry from "unconfirmed" to "specified and implemented, not adversarially tested" (Appendix H.11)
 - [x] Modules: signed submission pipeline (`module-submission.js`/`module_submission.rs`) — real Ed25519 signing (JS: `@noble/curves`, Rust: `ed25519-dalek`), replay-guarded, hash-checked against actually-fetched code, no economic gate on publishing (by design); 17 new tests
 - [x] Modules: automated JS/Rust cross-language parity for the submission signing scheme — `scripts/verify-submission-parity.sh`, both directions confirmed with real Ed25519 keys
@@ -1405,3 +1405,31 @@ previous update to this README.)
   'weak'. New whitepaper §27.2 update and Appendix H.23. 173 JS tests
   unaffected (this pass touched application wiring, not the already-
   tested pure module-registry.js/module-submission.js logic).
+- Built Transport (§25) — the interface, the delay-tolerant store-and-
+  forward backend, and the connection watchdog, all real and tested.
+  Deliberately scoped: the WebRTC mesh backend needs real signaling
+  infrastructure and real peer connections to verify at all, neither
+  available here — left an honest, explicit stub rather than a
+  fabricated implementation that has never actually connected two
+  peers, the same untestable-network-primitive pattern already used
+  for `solana-rpc.js`. `transport.js`'s `assertImplementsTransport()`
+  makes "nothing above this layer may depend on which concrete
+  transport is active" checkable — a partial backend fails loudly,
+  naming exactly which method is missing. `delay-tolerant-transport.js`
+  implements real queue-then-attempt semantics: a message is durably
+  queued before any network attempt, `flush()` preserves FIFO order per
+  peer and stops at the first failure rather than reordering, different
+  peers' queues are independent. **A real bug found by the first test
+  written, not by inspection**: the first `send()` never removed a
+  message from its queue after a successful *immediate* delivery, so an
+  already-delivered message still showed as queued — caught instantly
+  by an unambiguous test failure (`queueDepth` returned 1 where 0 was
+  expected), fixed by tracking and removing each entry by id on actual
+  success. `connection-watchdog.js` fires its stale callback exactly
+  once per episode (verified with an injected clock, not a real
+  timeout), correctly resets on real reconnect, and resolves the
+  boundary case (activity exactly at the timeout) explicitly. All three
+  pieces confirmed working together in one sequence: queue during an
+  outage, watchdog fires once the timeout elapses, flush delivers once
+  a real contact window opens. New whitepaper §25 update and Appendix
+  H.24. 21 new tests (5 + 9 + 7). 194 JS tests total.
