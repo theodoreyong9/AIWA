@@ -23,6 +23,7 @@
 // just another device running this same app with its own wallet).
 
 import { createLedger } from '../core/ledger-bridge.js';
+import { createPersistedLedger } from '../core/event-dag-persistence.js';
 import { materializeG } from '../core/economics/g.js';
 import { deriveDomainId, shortDomainLabel } from '../core/identity/domain-id.js';
 import { loadSolanaWeb3, generateKeypair, keypairFromSecretKey, encryptSecretKey, decryptSecretKey } from '../core/identity/solana-wallet.js';
@@ -177,6 +178,29 @@ class DomainReplica {
     this.lastEventId = this.genesisId;
   }
 
+  /**
+   * Called after loading a domain from a persisted ledger
+   * (event-dag-persistence.js), never for a brand-new domain. init()
+   * alone is NOT enough here: it always resets lastEventId to genesis,
+   * which is correct for a fresh domain but wrong for a restored one —
+   * every subsequent addEvent() call in this app chains off
+   * lastEventId as a single parent, so leaving it at genesis after
+   * restoring real history would silently branch new events off the
+   * very start, orphaning everything already accrued. Real, tested
+   * state (cadence's own domains[id].lastId, §10) is used to recover
+   * the true tip, not a guess.
+   */
+  restoreTipsFromDag() {
+    const events = this.dag.topoOrder();
+    if (events.length === 0) return;
+    this.genesisId = events[0].id;
+    this.lastEventId = events[events.length - 1].id; // the DAG's own deterministic topo order — this domain's own history is a single chain in practice, since only this domain ever adds to it directly
+    const cadenceState = materializeG({ reward: GENESIS_FORMULA_PARAMS, budgets: {} }, events).cadence;
+    const mine = cadenceState.domains[this.id];
+    this.lastCadenceId = mine?.lastId ?? null;
+    this.epoch = mine?.epoch ?? 0;
+  }
+
   materialize() { return materializeG({ reward: this.currentRewardParams(), budgets: theta.budgets }, this.dag.topoOrder()); }
   materializeFormulas() { return materializeFormulas(this.dag.topoOrder()); }
 
@@ -290,8 +314,9 @@ async function createWalletAndDomain(password) {
   localStorage.setItem(walletStorageKey(id), JSON.stringify(record));
   localStorage.setItem('aiwa-my-domain-id', id);
 
-  myDomain = new DomainReplica(id, await createLedger(), keypair);
+  myDomain = new DomainReplica(id, await createPersistedLedger(id, createLedger), keypair);
   await myDomain.init();
+  myDomain.restoreTipsFromDag(); // a brand-new domain: this is a no-op beyond confirming genesis is the tip
   theta = { ...theta, budgets: { ...theta.budgets, [id]: null } };
 }
 
@@ -307,8 +332,11 @@ async function unlockWalletAndDomain(password) {
   const keypair = keypairFromSecretKey(web3, secretKey);
   const id = await deriveDomainId(keypair.publicKey.toBytes());
 
-  myDomain = new DomainReplica(id, await createLedger(), keypair);
-  await myDomain.init();
+  myDomain = new DomainReplica(id, await createPersistedLedger(id, createLedger), keypair);
+  if (myDomain.dag.size === 0) {
+    await myDomain.init(); // genuinely first time this browser has seen this domain — nothing to restore
+  }
+  myDomain.restoreTipsFromDag(); // real history restored from IndexedDB — recover the true tip, not genesis
   theta = { ...theta, budgets: { ...theta.budgets, [id]: null } };
 }
 
