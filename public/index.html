@@ -5,74 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AIWA — Autonomous Interplanetary Web Application</title>
   <meta name="description" content="AIWA: reference architecture for identity, modular applications, and value accrual under arbitrarily long communication partition." />
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; max-width: 30rem; margin: 0 auto; padding: 0 0 4.5rem; color: #1a1a1a; }
-    h1 { margin: 0.8rem 1rem 0.1rem; font-size: 1.3rem; }
-    #subtitle { margin: 0 1rem 0.4rem; color: #666; font-size: 0.82rem; }
-    #status { margin: 0 1rem 0.5rem; color: #555; font-size: 0.8rem; }
-    #my-domain-badge { margin: 0 1rem 0.6rem; font-family: ui-monospace, monospace; font-size: 0.78rem; color: #444; background: #f2f2f4; border-radius: 6px; padding: 0.4rem 0.6rem; }
-
-    .screen { display: none; padding: 0 1rem; }
-    .screen.active { display: block; }
-
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 0.8rem; margin-bottom: 0.7rem; background: #fff; }
-    .card h2 { font-size: 0.92rem; margin: 0 0 0.5rem; }
-    .stat-row { display: flex; justify-content: space-between; padding: 0.2rem 0; font-size: 0.88rem; border-bottom: 1px solid #eee; font-variant-numeric: tabular-nums; }
-    .stat-row span:first-child { color: #666; }
-
-    button { font: inherit; padding: 0.42rem 0.65rem; border-radius: 7px; border: 1px solid #999; background: #fff; }
-    button:disabled { opacity: 0.4; }
-    input, select, textarea { font: inherit; font-size: 0.84rem; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 6px; width: 100%; box-sizing: border-box; }
-    textarea { font-family: ui-monospace, monospace; font-size: 0.75rem; resize: vertical; }
-    label.field-label { font-size: 0.72rem; color: #888; display: block; margin: 0.4rem 0 0.15rem; }
-
-    .row { display: flex; gap: 0.4rem; margin-bottom: 0.4rem; }
-    .row > * { flex: 1; }
-    .full-btn { width: 100%; margin-top: 0.3rem; font-weight: 600; }
-    .msg { font-size: 0.76rem; margin-top: 0.3rem; min-height: 1em; }
-    .msg.error { color: #b33; }
-    .msg.success { color: #1a8a4a; }
-    .hint { font-size: 0.73rem; color: #888; margin-top: 0.3rem; }
-
-    #no-wallet-notice { margin: 1rem; padding: 0.8rem; border: 1px dashed #999; border-radius: 10px; font-size: 0.85rem; color: #444; }
-
-    #network-warning { font-size: 0.76rem; padding: 0.5rem 0.6rem; border-radius: 6px; margin-bottom: 0.6rem; background: #fff6e5; border: 1px solid #f0d090; color: #a35a00; }
-    #network-warning.mainnet { background: #fff0f0; border-color: #f0a0a0; color: #a30000; font-weight: 600; }
-
-    #desktop-icons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; margin-top: 0.4rem; }
-    .icon-tile { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; font-size: 0.66rem; text-align: center; cursor: pointer; }
-    .icon-tile .icon-glyph { font-size: 1.6rem; width: 3rem; height: 3rem; display: flex; align-items: center; justify-content: center; background: #f2f2f4; border-radius: 12px; border: 1px solid #e0e0e0; }
-    #desktop-empty { color: #999; font-size: 0.85rem; padding: 1.5rem 0; text-align: center; }
-
-    .catalog-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid #eee; }
-    .catalog-row .catalog-icon { font-size: 1.3rem; width: 2rem; text-align: center; }
-    .catalog-row .catalog-info { flex: 1; min-width: 0; }
-    .catalog-row .catalog-name { font-size: 0.88rem; font-weight: 600; }
-    .catalog-row .catalog-meta { font-size: 0.7rem; color: #888; }
-    .catalog-row button { font-size: 0.72rem; padding: 0.3rem 0.5rem; flex-shrink: 0; }
-    #catalog-empty { color: #999; font-size: 0.85rem; padding: 0.8rem 0; text-align: center; }
-
-    #contacts-list .contact-row { padding: 0.5rem 0; border-bottom: 1px solid #eee; }
-    #contacts-list .contact-hash { font-family: ui-monospace, monospace; font-size: 0.8rem; }
-    #contacts-list .contact-delay { font-size: 0.72rem; color: #888; }
-    #contacts-empty { color: #999; font-size: 0.82rem; padding: 0.8rem 0; text-align: center; }
-
-    #log-list { font-family: ui-monospace, monospace; font-size: 0.72rem; color: #555; max-height: 6rem; overflow-y: auto; background: #f7f7f8; border: 1px solid #ddd; border-radius: 8px; padding: 0.4rem 0.6rem; }
-    #log-list div { padding: 0.08rem 0; }
-
-    #bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; display: flex; background: #fff; border-top: 1px solid #ddd; padding: 0.3rem 0.2rem calc(0.3rem + env(safe-area-inset-bottom)); z-index: 10; max-width: 30rem; margin: 0 auto; }
-    .nav-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.1rem; border: none; background: none; font-size: 0.64rem; color: #888; padding: 0.3rem 0; }
-    .nav-btn .nav-icon { font-size: 1.1rem; }
-    .nav-btn.active { color: #1a1a1a; font-weight: 700; }
-
-    #plugin-runner { position: fixed; inset: 0; background: #fff; z-index: 20; display: flex; flex-direction: column; padding: 0.8rem; }
-    #plugin-runner.plugin-runner-hidden { display: none; }
-    #plugin-runner-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
-    #plugin-runner-header span { font-weight: 700; font-size: 0.95rem; }
-    #plugin-runner-container { flex: 1; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
-    #plugin-runner-container iframe { width: 100%; height: 100%; border: 0; }
-  </style>
+  <link rel="stylesheet" href="css/aiwa.css" />
   <script type="importmap">
   {
     "imports": {
