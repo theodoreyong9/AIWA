@@ -13,5 +13,5 @@ pub use module_registry::{
 pub use module_registry_reducer::{apply_module_event, materialize_module_registry};
 pub use module_submission::{
     build_submission_event, record_nonce, submit_module, validate_submission,
-    verify_submission_signature, SubmissionEvent, SubmissionState, SubmitOutcome, ValidationOutcome,
+    verify_submission_signature, SubmissionEligibilityCheck, SubmissionEvent, SubmissionState, SubmitOutcome, ValidationOutcome,
 };
