@@ -682,6 +682,8 @@ previous update to this README.)
 - [x] Conservation Phases 4–5: deliberate non-atomic-consume counterexample (Appendix H.9.1), cross-language parity (Appendix H.9.2) — 7 new tests
 - [x] **Conservation plan complete** — all 5 phases done; §7's pre-existing "Appendix B.7" mis-citation fixed in the whitepaper
 - [x] Wire Conservation to economics: `claim-issue`/`transfer` DAG events bridge G's balance to conservation.js's real pipeline — a domain can now actually send value to another domain, not only accrue new value from nothing. See changelog below and whitepaper §7/Appendix H.16.
+- [x] **Security**: `transfer` events now require a real Ed25519 signature proving control of the `from` domain, closing a forgery vulnerability where ownership was checked by string comparison alone. See whitepaper §7/Appendix H.18.
+- [x] Identity cost is now a materialized view over H_d (`identity-register` DAG events), not a standalone local variable — closes the exact "where do these live, this looks critical for interplanetary deployment" gap. See whitepaper §26/Appendix H.19.
 - [x] The real compiled `.wasm` binary, loaded in an actual deployed browser session — confirmed loading with zero errors (only an unrelated favicon 404 remained). CI now builds and commits this binary automatically (`ci.yml`'s `wasm-build` job); getting there required finding and fixing three separate, real CI failures (a lost executable bit from a web-UI re-upload, a stale root `.gitignore` rule, and — the one that actually mattered — a `.gitignore` `wasm-pack` silently regenerates *inside its own output directory* on every single build, defeating the repo's own `.gitignore` regardless of what it says). What's still open: a live, in-browser side-by-side comparison of WASM-backed vs. JS-backed computed results — the shape-parity tests give strong reason to expect agreement, but that specific comparison hasn't been run.
 - [ ] Transport (pluggable layer, §25)
 - [x] Modules (§27): open registration, content-addressed code integrity, real iframe sandbox mechanism — 18 JS + 15 Rust tests; closes R19 in the security property registry from "unconfirmed" to "specified and implemented, not adversarially tested" (Appendix H.11)
@@ -1210,3 +1212,57 @@ previous update to this README.)
   — a plugin can genuinely stake and claim on the domain's behalf, not a
   simulated stand-in. A close button unmounts the iframe cleanly. 146
   JS tests total.
+- **Two real security findings, both closed with tests proving the
+  fix, not just asserted.** Both came from the same source: precise
+  questions, not a checklist audit. Asked "le soul correspond à une
+  signature AIWA ou Solana? ils sont où?" — checking the answer meant
+  reading `conservation.js`'s ownership check directly, which turned up
+  a real vulnerability: `claim.owner == from` was a plain string
+  comparison, with nothing verifying whoever wrote a `transfer` event
+  actually controlled the private key behind `from`. Anyone able to add
+  an event to a domain's shared history (which, after reconciliation,
+  is anyone who's ever merged with the victim) could forge a transfer
+  stealing any claim. Closed in both languages with real cryptography —
+  `conservation-bridge.js` (`@noble/curves`) and `conservation_bridge.rs`
+  (`ed25519-dalek`) now require a transfer to carry a real Ed25519
+  signature over `(claimId, from, to, nonce, timestamp)`, verified
+  against the declared `signerPubkey`, with a further check that hashing
+  that exact public key reproduces the claimed `from` domain id — proof
+  of control, not a declared label. A nonce replay guard prevents
+  reapplying an already-consumed signed transfer. The load-bearing test
+  in each language: a real attacker keypair signs a transfer claiming
+  someone else's domain id as `from` — confirmed rejected, victim's
+  claim untouched, attacker receives nothing. Extracted the domain-id
+  derivation into a shared `domain-id.js` / `domain_id.rs` in the
+  process, and — since the derivation now sits inside a signature-
+  verification path — extended it from a 12-hex-char truncation (48
+  bits, within reach of a resourced brute-force search for a colliding
+  key) to the full 64-hex-char / 256-bit hash, truncating only for
+  display via a separate `shortDomainLabel()`/`short_domain_label()`.
+  Second: confirmed the user's own suspicion that identity-cost state
+  living in a standalone variable was "critical for interplanetary
+  deployment" — it was. `identityState` never got folded from H_d,
+  meaning two domains that reconciled after any partition would never
+  learn the other had a legitimately registered identity. Closed with
+  `identity-cost-reducer.js` / `identity_cost_reducer.rs`: a verified
+  burn becomes an `identity-register` DAG event, folded and propagated
+  by `merge()` like everything else, reusing `registerIdentityCost()`'s
+  already-tested replay guard unchanged rather than writing new
+  verification logic. `identity-flow.js` simplified to no longer touch
+  any local identity state at all — it now only produces a verified
+  `(signature, burnedLamports)` pair for the caller to fold as an event.
+  **A near-miss caught before delivery, not after**: `main.js` had its
+  own local copy of the domain-id derivation, independent of the one
+  just extracted for the signature-verification path, and that local
+  copy still truncated to 12 characters after the shared one was
+  extended to 256 bits. Had this shipped, no legitimately signed
+  transfer would ever have verified. Caught by a routine check of which
+  imports were actually wired up, not by a test written for this
+  specific mistake — a reminder that extracting a shared function
+  doesn't by itself remove a stale duplicate elsewhere. Verified end to
+  end outside the DOM, using the exact functions `main.js` calls: wallet
+  created → domain id derived (64 chars) → identity registered via a
+  real DAG event → accrued 50 → sent 20 (signed) → sender left with 30,
+  recipient independently confirmed to own an active claim of 20. New
+  whitepaper §7 and §26 security notes, Appendix H.18 and H.19. 155 JS
+  / 120 Rust tests total (114 lib + 6 integration).
