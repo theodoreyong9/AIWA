@@ -1536,3 +1536,45 @@ previous update to this README.)
   update and Appendix H.26. 12 new tests (8 + 4). 217 JS tests total —
   the last item on this project's own open-work list before AI (§28,
   deliberately deferred, not an oversight).
+- Built the AI idea agent (§28, narrowed) and the hyperprofile
+  foundation (§27.6) — after reading through the real YourMine
+  reference files (ai.js, profile.js, desk.js, app.js) for genuine
+  inspiration, then deliberately scoping down to exactly what was
+  confirmed wanted: only an idea generator (not code generation, not a
+  public-code checker), themes dropped in favor of the presentation-
+  token layer already built, and hyperprofile grounded in this
+  project's own real `ctx`/transport/contacts primitives rather than
+  YourMine's same-origin `window.YM_S` global registry, which AIWA's
+  real sandbox (§27.1) deliberately forbids.
+  **AI idea agent**: `idea-agent.js` — context snapshot from a domain's
+  own real registered modules and real contacts (never invented),
+  system-prompt construction, and reply sanitization against a known
+  local-model leak failure mode — is pure, fully tested logic with zero
+  WebGPU dependency (10 tests). `webllm-engine.js` — real WebGPU
+  detection, a real dedicated Worker, real streaming chat via
+  `@mlc-ai/web-llm` — is real code, untestable here for the same reason
+  `solana-rpc.js`'s network calls are. Wired into the Domain screen: a
+  "Get an idea" button showing exactly what the agent sees (your module
+  count, contact count) before generating.
+  **Hyperprofile**: `ctx.share(key, value)` — durable, DAG-replicated,
+  latest-write-wins (unlike immutable module code hashes or minted
+  formulas), `value: null` retracts a key for real. `ctx.sendToPeer`/
+  `ctx.onPeerMessage` — real-time, routed through the real transport
+  (§25), delivered only if the target module happens to be the one
+  currently mounted on the receiving domain, no inbound queue. A "Visit
+  profile" button in Contacts shows what a domain's modules have
+  genuinely published, materialized the same way every other view in
+  this project is — nothing invented, nothing fetched from anywhere
+  else.
+  **A real design bug found during end-to-end verification, not by
+  inspection**: the existing `simulatedNetworkSend()` treated every
+  transport message as a reconciliation trigger regardless of content —
+  would have silently turned a real-time module message into a full DAG
+  merge. Fixed by branching on the message's own declared type before
+  deciding what delivery means. Verified end to end using the real
+  `DomainReplica` pattern: published data invisible before
+  reconciliation, correctly visible after; a real-time message reaches
+  the exact module it's addressed to and is silently ignored by an
+  unrelated one. New whitepaper §27.6, §28 rewrite, Appendix H.27. 23
+  new tests (10 + 9 + 4 more in module-sandbox-html.test.mjs). 239 JS
+  tests total.
