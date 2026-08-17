@@ -1,12 +1,122 @@
 [
-  { "label": "genesis", "parents": [], "payload": { "type": "genesis" } },
-  { "label": "c1", "parents": ["genesis"], "payload": { "type": "cadence", "domain": "d1", "epoch": 1 } },
-  { "label": "c2", "parents": ["c1"], "payload": { "type": "cadence", "domain": "d1", "epoch": 2 } },
-  { "label": "a1", "parents": ["c2"], "payload": { "type": "accrual", "domain": "d1", "b": 10, "q0": 0 } },
-  { "label": "c1b", "parents": ["genesis"], "payload": { "type": "cadence", "domain": "d2", "epoch": 1 } },
-  { "label": "a2", "parents": ["c1b"], "payload": { "type": "accrual", "domain": "d2", "b": 20, "q0": 0 } },
-  { "label": "c3", "parents": ["c2"], "payload": { "type": "cadence", "domain": "d1", "epoch": 3 } },
-  { "label": "a3", "parents": ["c3"], "payload": { "type": "accrual", "domain": "d1", "b": 5, "q0": 1 } },
-  { "label": "a4-invalid", "parents": ["c3"], "payload": { "type": "accrual", "domain": "d1", "b": -1, "q0": 0 } },
-  { "label": "c4-skip", "parents": ["c3"], "payload": { "type": "cadence", "domain": "d1", "epoch": 5 } }
+  {
+    "label": "genesis",
+    "parents": [],
+    "payload": {
+      "type": "genesis"
+    }
+  },
+  {
+    "label": "c1",
+    "parents": [
+      "genesis"
+    ],
+    "payload": {
+      "type": "cadence",
+      "domain": "d1",
+      "epoch": 1,
+      "vdfIterations": 50,
+      "vdfOutput": "8adb1b83ff6aa686793c1995bbd1f627d9cfb9ce35465294ecbc062af043a19f"
+    }
+  },
+  {
+    "label": "c2",
+    "parents": [
+      "c1"
+    ],
+    "payload": {
+      "type": "cadence",
+      "domain": "d1",
+      "epoch": 2,
+      "vdfIterations": 50,
+      "vdfOutput": "6bf0cc5cb7d55d92a2e53d78cff314a4097d37a81fe48d1c616e4142e8aecee3"
+    }
+  },
+  {
+    "label": "a1",
+    "parents": [
+      "c2"
+    ],
+    "payload": {
+      "type": "accrual",
+      "domain": "d1",
+      "b": 10,
+      "q0": 0
+    }
+  },
+  {
+    "label": "c1b",
+    "parents": [
+      "genesis"
+    ],
+    "payload": {
+      "type": "cadence",
+      "domain": "d2",
+      "epoch": 1,
+      "vdfIterations": 50,
+      "vdfOutput": "b286cd45d9b7afda84339495cf480a50ead123ab3034ec35d2d23787411230e3"
+    }
+  },
+  {
+    "label": "a2",
+    "parents": [
+      "c1b"
+    ],
+    "payload": {
+      "type": "accrual",
+      "domain": "d2",
+      "b": 20,
+      "q0": 0
+    }
+  },
+  {
+    "label": "c3",
+    "parents": [
+      "c2"
+    ],
+    "payload": {
+      "type": "cadence",
+      "domain": "d1",
+      "epoch": 3,
+      "vdfIterations": 50,
+      "vdfOutput": "033170a06d571d7a58e34cd7cd55f6c3b20996949851a4b8c2762d5d0a975433"
+    }
+  },
+  {
+    "label": "a3",
+    "parents": [
+      "c3"
+    ],
+    "payload": {
+      "type": "accrual",
+      "domain": "d1",
+      "b": 5,
+      "q0": 1
+    }
+  },
+  {
+    "label": "a4-invalid",
+    "parents": [
+      "c3"
+    ],
+    "payload": {
+      "type": "accrual",
+      "domain": "d1",
+      "b": -1,
+      "q0": 0
+    }
+  },
+  {
+    "label": "c4-skip",
+    "parents": [
+      "c3"
+    ],
+    "payload": {
+      "type": "cadence",
+      "domain": "d1",
+      "epoch": 5,
+      "vdfIterations": 50,
+      "vdfOutput": "45420a68f14aa0c9363430612b3da530f3f555f55b74c4688f2939a75895e425"
+    }
+  }
 ]
