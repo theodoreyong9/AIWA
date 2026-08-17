@@ -94,6 +94,8 @@ mod tests {
 
     #[test]
     fn matches_hand_computed_value_using_real_formula_constants() {
+        // b=1, q=100, q_total=100, T=0 — see reward.test.mjs for the
+        // independently-verified expected value.
         let r = reward(1.0, 100.0, 100.0, 0.0, real_params()).unwrap();
         assert!((r - 0.11844290947765648).abs() < 1e-9);
     }
@@ -172,14 +174,14 @@ mod tests {
     #[test]
     fn elapsed_epochs_reads_current_domain_epoch() {
         let mut state = CadenceState::new();
-        state.domains.insert("d1".to_string(), DomainCadenceState { epoch: 7, last_id: Some("c7".to_string()) });
+        state.domains.insert("d1".to_string(), DomainCadenceState { epoch: 7, last_id: Some("c7".to_string()), vdf_output: None });
         assert_eq!(elapsed_epochs(&state, "d1", 3), 4);
     }
 
     #[test]
     fn elapsed_epochs_never_goes_negative() {
         let mut state = CadenceState::new();
-        state.domains.insert("d1".to_string(), DomainCadenceState { epoch: 2, last_id: Some("c2".to_string()) });
+        state.domains.insert("d1".to_string(), DomainCadenceState { epoch: 2, last_id: Some("c2".to_string()), vdf_output: None });
         assert_eq!(elapsed_epochs(&state, "d1", 5), 0);
     }
 
@@ -192,7 +194,7 @@ mod tests {
     #[test]
     fn domain_age_reads_current_epoch() {
         let mut state = CadenceState::new();
-        state.domains.insert("d1".to_string(), DomainCadenceState { epoch: 42, last_id: Some("c42".to_string()) });
+        state.domains.insert("d1".to_string(), DomainCadenceState { epoch: 42, last_id: Some("c42".to_string()), vdf_output: None });
         assert_eq!(domain_age(&state, "d1"), 42);
     }
 
