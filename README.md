@@ -1774,3 +1774,23 @@ previous update to this README.)
   configuration discipline. New whitepaper §16.2, R11 closed in the
   §17 matrix, Appendix H.30. 319 JS tests (was 301), 152 Rust tests
   (was 134), zero warnings either language.
+- **Fixed CI break caused by R11's own delivery, found immediately
+  from a real failed CI run**: `cadence-vdf.js` had introduced this
+  project's first external npm dependency (`@noble/hashes`) into a
+  core reducer's own import chain — breaking the `g-parity` CI job
+  (and, latent, `id-parity`/`conservation-parity` too), each correctly
+  designed with no `npm install` step, since every other core reducer
+  file uses only native Web Crypto or pure computation. Fixed by
+  replacing the dependency with a hand-rolled, dependency-free SHA-256
+  implementation in `cadence-vdf.js` itself — verified against the
+  official published test vectors (empty string, `"abc"`) and,
+  critically, against the exact same function's own prior
+  `@noble/hashes`-backed output for identical inputs, confirmed byte-
+  for-byte identical, so no already-committed fixture
+  (`test-vectors/g-scenario.json`, the Rust cross-language parity
+  constant) needed to change. `@noble/hashes` removed from
+  `package.json` and `index.html`'s importmap. Re-verified the real
+  parity script (`scripts/check-g-parity.mjs`) runs correctly with
+  `node_modules` entirely absent, matching the real CI job's own
+  environment exactly. 319 JS / 152 Rust tests, unchanged, all still
+  green.
