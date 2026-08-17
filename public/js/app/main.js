@@ -53,6 +53,7 @@ import { mountModule } from '../core/modules/module-sandbox.js';
 import { getTheme, DEFAULT_THEME_ID } from '../core/presentation/theme-tokens.js';
 import { loadVerifiedModuleCode } from '../core/modules/module-loader.js';
 import { verifyModuleIntegrity } from '../core/modules/module-hash.js';
+import { vdfSeed, computeVdfChain } from '../core/economics/cadence-vdf.js';
 
 const WALLET_STORAGE_PREFIX = 'aiwa-wallet-';
 const DESKTOP_PIN_PREFIX = 'aiwa-desktop-pins-';
@@ -136,6 +137,7 @@ class DomainReplica {
     this.genesisId = null;
     this.lastEventId = null;
     this.lastCadenceId = null;
+    this.lastCadenceVdfOutput = null; // R11 — the previous epoch's own real VDF chain output, seeds the next one
     this.epoch = 0;
     this.pending = [];
     this.activeFormulaId = GENESIS_FORMULA_ID; // local choice, not DAG state — see mintFormula()'s header
@@ -163,11 +165,22 @@ class DomainReplica {
     return this.transport.flush();
   }
 
+  /**
+   * R11: computes a real sequential-hash-chain proof before posting —
+   * see cadence-vdf.js's own header. This is real, felt cost by
+   * design, not a UX inconvenience to optimize away: the delay IS the
+   * security property. cadenceVdfIterations is a per-deployment
+   * config value (Parameters screen), matching §16.1's own stated
+   * discipline that difficulty should never be a hardcoded constant.
+   */
   async advanceCadence() {
     const nextEpoch = this.epoch + 1;
     const parents = [...new Set([this.lastCadenceId ?? this.genesisId, this.lastEventId])];
-    const id = await this.dag.addEvent(parents, { type: 'cadence', domain: this.id, epoch: nextEpoch });
+    const seed = vdfSeed(this.id, this.lastCadenceVdfOutput ?? 'genesis');
+    const vdfOutput = computeVdfChain(seed, cadenceVdfIterations);
+    const id = await this.dag.addEvent(parents, { type: 'cadence', domain: this.id, epoch: nextEpoch, vdfIterations: cadenceVdfIterations, vdfOutput });
     this.lastCadenceId = id;
+    this.lastCadenceVdfOutput = vdfOutput;
     this.lastEventId = id;
     this.epoch = nextEpoch;
     return id;
@@ -225,6 +238,7 @@ class DomainReplica {
     const cadenceState = materializeG({ reward: GENESIS_FORMULA_PARAMS, budgets: {} }, events).cadence;
     const mine = cadenceState.domains[this.id];
     this.lastCadenceId = mine?.lastId ?? null;
+    this.lastCadenceVdfOutput = mine?.vdfOutput ?? null;
     this.epoch = mine?.epoch ?? 0;
   }
 
@@ -333,6 +347,13 @@ class DomainReplica {
 
 let theta = { budgets: {} }; // .reward removed — see currentRewardParams(); §10's constants now live at formula id 'genesis', not here
 let activeThemeId = DEFAULT_THEME_ID; // §27.5 presentation independence — a display preference, never DAG state
+// R11: real, felt cost by design (cadence-vdf.js) — a per-deployment
+// difficulty value, not a hardcoded constant (§16.1's own stated
+// discipline). ~240ms on typical hardware at this default; a real
+// deployment sizes this against its own target epoch duration and
+// hardware, exactly like §16.1 already discusses for the heartbeat
+// interval Δ.
+let cadenceVdfIterations = 200000;
 let myDomain = null; // the one real domain this app instance represents — null until a wallet exists
 let testPeers = new Map(); // id -> DomainReplica, testing-only, never the primary UI concept
 let submissionState = initialSubmissionState();
@@ -1263,6 +1284,13 @@ async function main() {
   document.getElementById('theme-select').addEventListener('change', (e) => {
     activeThemeId = e.target.value; // local display preference — deliberately never touches theta, myDomain, or any DAG state
     log(`Presentation switched to '${activeThemeId}' — no module, rank, or economic state changed (§27.5).`);
+  });
+  document.getElementById('cadence-vdf-iterations').addEventListener('change', (e) => {
+    const n = parseInt(e.target.value, 10);
+    if (Number.isInteger(n) && n >= 1) {
+      cadenceVdfIterations = n;
+      log(`Cadence VDF difficulty set to ${n} iterations — a real, felt cost on every future epoch advance for this domain (R11).`);
+    }
   });
   document.getElementById('folder-panel-close').addEventListener('click', closeFolderPanel);
   document.getElementById('folder-panel-label').addEventListener('change', async (e) => {
