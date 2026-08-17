@@ -418,3 +418,62 @@ label.field-label {
   .screen.active { grid-template-columns: repeat(auto-fit, minmax(23rem, 1fr)); }
   #desktop-icons { grid-template-columns: repeat(10, minmax(0, 5.5rem)); }
 }
+
+/* ── Desktop drag-and-drop: folders and drop-target highlight ──────── */
+.icon-glyph--folder {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  padding: 0.15rem;
+}
+.icon-tile--drop-target .icon-glyph {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+#folder-panel {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 25;
+  padding: 0.8rem;
+  display: flex;
+  flex-direction: column;
+}
+#folder-panel.folder-panel-hidden { display: none; }
+#folder-panel-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
+#folder-panel-label {
+  font-family: var(--mono);
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid transparent;
+}
+#folder-panel-label:hover, #folder-panel-label:focus { border-color: var(--border-strong); }
+#folder-panel-close { flex-shrink: 0; }
+#folder-panel-items { flex: 1; overflow-y: auto; }
+.folder-item-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.folder-item-row:last-child { border-bottom: none; }
+.folder-item-row .icon-glyph { width: 2.2rem; height: 2.2rem; font-size: 1.1rem; cursor: pointer; }
+.folder-item-row .eject-btn { flex-shrink: 0; font-size: 0.72rem; padding: 0.3rem 0.5rem; cursor: pointer; }
+
+@media (min-width: 900px) {
+  #folder-panel {
+    padding: 6vh 12vw;
+    background: rgba(11, 13, 16, 0.86);
+  }
+  #folder-panel-header,
+  #folder-panel-items {
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+  #folder-panel-header { padding: 0.7rem; border-radius: var(--radius) var(--radius) 0 0; border-bottom: none; }
+  #folder-panel-items { padding: 0.3rem 0.7rem; border-top: none; border-radius: 0 0 var(--radius) var(--radius); }
+}
