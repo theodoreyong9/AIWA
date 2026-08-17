@@ -9,7 +9,8 @@
   <script type="importmap">
   {
     "imports": {
-      "@noble/curves/ed25519": "https://esm.sh/@noble/curves@1.7.0/ed25519"
+      "@noble/curves/ed25519": "https://esm.sh/@noble/curves@1.7.0/ed25519",
+      "@noble/hashes/sha2.js": "https://esm.sh/@noble/hashes@1.7.0/sha2"
     }
   }
   </script>
@@ -162,6 +163,13 @@
           <option value="default">Default</option>
           <option value="compact">Compact (high-contrast, low-power)</option>
         </select>
+      </div>
+
+      <div class="card">
+        <h2>Cadence VDF (R11) — real, felt cost by design</h2>
+        <p class="hint">Every cadence epoch now requires a real sequential hash-chain proof (cadence-vdf.js) — bounds the RATE of advancement, not just its shape, closing a gap the mandatory heartbeat alone never addressed (§16.1). The delay IS the security property, not overhead to minimize. A per-deployment difficulty value, never a hardcoded constant.</p>
+        <input type="number" id="cadence-vdf-iterations" min="1000" step="1000" value="200000" />
+        <p class="hint" id="cadence-vdf-estimate"></p>
       </div>
 
       <div class="card">
