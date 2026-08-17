@@ -39,6 +39,10 @@ import { materializeFormulas, GENESIS_FORMULA_ID, GENESIS_FORMULA_PARAMS } from 
 import { collectContextSnapshot, buildIdeaSystemPrompt, sanitizeIdeaReply } from '../core/ai/idea-agent.js';
 import { detectWebGpuSupport, loadEngine, streamChat } from '../core/ai/webllm-engine.js';
 import { materializePublicProfiles, publishedDataForDomain } from '../core/profile/public-profile-reducer.js';
+import {
+  layoutFromPinnedIds, allModuleIdsInLayout, moveItem, createFolderFromDrop,
+  mergeIntoFolder, ejectFromFolder, renameFolder, removeModuleFromLayout,
+} from '../core/desktop/desktop-layout.js';
 import { rankFromIdentityAndCadence, checkSubmissionEligibility, computeModuleRank } from '../core/modules/module-rank.js';
 import { computeModuleHash } from '../core/modules/module-hash.js';
 import { buildSubmissionEvent, validateSubmission, initialSubmissionState, recordNonce } from '../core/modules/module-submission.js';
@@ -315,15 +319,32 @@ function setMsg(elId, text, kind) {
   el.className = `msg ${kind ?? ''}`;
 }
 
-function pinnedIds(domainId) {
-  try { return JSON.parse(localStorage.getItem(DESKTOP_PIN_PREFIX + domainId) || '[]'); } catch { return []; }
+/**
+ * Reads this domain's desktop layout — icons and folders, in the exact
+ * order the user last arranged them (desktop-layout.js). Migrates
+ * transparently from the earlier flat array-of-ids format under the
+ * SAME localStorage key, on read, so no existing user's pinned icons
+ * are lost by this change; the migration is a pure, one-way upgrade
+ * (old format read → new format returned), never written back until
+ * the user's next real interaction saves it.
+ */
+function getDesktopLayout(domainId) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DESKTOP_PIN_PREFIX + domainId) || '[]');
+    if (raw.length > 0 && typeof raw[0] === 'string') return layoutFromPinnedIds(raw); // old format
+    return raw;
+  } catch { return []; }
 }
-function setPinned(domainId, ids) { localStorage.setItem(DESKTOP_PIN_PREFIX + domainId, JSON.stringify(ids)); }
-function togglePin(domainId, id) {
-  const ids = pinnedIds(domainId);
-  const idx = ids.indexOf(id);
-  if (idx >= 0) ids.splice(idx, 1); else ids.push(id);
-  setPinned(domainId, ids);
+function setDesktopLayout(domainId, layout) { localStorage.setItem(DESKTOP_PIN_PREFIX + domainId, JSON.stringify(layout)); }
+
+/** The flat set of pinned module ids, top-level or inside any folder — unchanged external behavior for every existing call site that only needs "is this module currently on the desktop," not the desktop's own arrangement. */
+function pinnedIds(domainId) {
+  return allModuleIdsInLayout(getDesktopLayout(domainId));
+}
+function togglePin(domainId, moduleId) {
+  const layout = getDesktopLayout(domainId);
+  const isPinned = allModuleIdsInLayout(layout).includes(moduleId);
+  setDesktopLayout(domainId, isPinned ? removeModuleFromLayout(layout, moduleId) : [...layout, { kind: 'icon', moduleId }]);
 }
 
 function contactDelay(domainId) {
@@ -533,28 +554,170 @@ async function renderDesktop() {
 
   const registry = myDomain.materializeModules();
   const localIdentityState = myDomain.materializeIdentity();
-  const pinned = new Set(pinnedIds(myDomain.id));
-  const pinnedModules = Object.values(registry.modules)
-    .filter((m) => pinned.has(m.id))
-    .map((m) => ({ ...m, rank: rankFromIdentityAndCadence(localIdentityState, gState.cadence, m.author, myDomain.currentRewardParams()) }))
-    .sort((a, b) => b.rank - a.rank);
+  const layout = getDesktopLayout(myDomain.id);
+  const rankOf = (moduleId) => {
+    const m = registry.modules[moduleId];
+    return m ? rankFromIdentityAndCadence(localIdentityState, gState.cadence, m.author, myDomain.currentRewardParams()) : 0;
+  };
 
   const iconsEl = document.getElementById('desktop-icons');
   const emptyEl = document.getElementById('desktop-empty');
-  if (pinnedModules.length === 0) {
+  if (layout.length === 0) {
     emptyEl.style.display = 'block';
     iconsEl.innerHTML = '';
     return;
   }
   emptyEl.style.display = 'none';
   iconsEl.innerHTML = '';
-  for (const m of pinnedModules) {
+  for (let i = 0; i < layout.length; i++) {
+    const item = layout[i];
     const tile = document.createElement('div');
     tile.className = 'icon-tile';
-    tile.title = `rank ${m.rank.toFixed(2)}`;
-    tile.innerHTML = `<div class="icon-glyph">${m.icon || '⬡'}</div><div>${m.name}</div>`;
-    tile.addEventListener('click', () => runModule(m));
+    tile.dataset.index = String(i);
+
+    if (item.kind === 'folder') {
+      const glyphs = item.moduleIds.slice(0, 4).map((id) => registry.modules[id]?.icon || '⬡').join('');
+      tile.innerHTML = `<div class="icon-glyph icon-glyph--folder">${glyphs}</div><div>${item.label}</div>`;
+      tile.title = `${item.moduleIds.length} module${item.moduleIds.length === 1 ? '' : 's'}`;
+      tile.addEventListener('click', () => openFolderPanel(item.id));
+    } else {
+      const m = registry.modules[item.moduleId];
+      if (!m) continue; // a module that was unregistered since being pinned — skip rather than render a broken tile
+      tile.innerHTML = `<div class="icon-glyph">${m.icon || '⬡'}</div><div>${m.name}</div>`;
+      tile.title = `rank ${rankOf(item.moduleId).toFixed(2)}`;
+      tile.addEventListener('click', () => runModule(m));
+    }
+    setupDesktopTileDrag(tile, iconsEl, i);
     iconsEl.appendChild(tile);
+  }
+}
+
+/**
+ * Real pointer-based drag-and-drop for one desktop tile — adapted from
+ * the real mechanism in YourMine's desk.js (pointerdown/pointermove/
+ * pointerup, not the HTML5 native drag API, since pointer events work
+ * uniformly across touch and mouse) — scoped to AIWA's single-page
+ * desktop grid: no multi-page edge-scroll, since AIWA's desktop has no
+ * pagination concept to scroll between. Untestable in this development
+ * sandbox for the same reason module-sandbox.js's DOM code is (no real
+ * browser under `node --test`) — every RULE about where a drop lands
+ * lives in desktop-layout.js instead, fully tested there; this
+ * function only translates real pointer coordinates into calls to
+ * those already-verified pure functions.
+ */
+function setupDesktopTileDrag(tile, gridEl, index) {
+  let startX = 0, startY = 0, dragging = false, pointerDown = false;
+  let ghost = null;
+
+  tile.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    pointerDown = true;
+    dragging = false;
+    startX = e.clientX;
+    startY = e.clientY;
+  });
+
+  tile.addEventListener('pointermove', (e) => {
+    if (!pointerDown) return;
+    const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
+    if (!dragging && dist > 8) {
+      dragging = true;
+      try { tile.setPointerCapture(e.pointerId); } catch { /* not critical if unsupported */ }
+      ghost = tile.cloneNode(true);
+      ghost.style.cssText = 'position:fixed;pointer-events:none;opacity:0.85;z-index:50;width:3rem;';
+      document.body.appendChild(ghost);
+      tile.style.opacity = '0.35';
+    }
+    if (!dragging) return;
+    e.preventDefault();
+    ghost.style.left = `${e.clientX - 24}px`;
+    ghost.style.top = `${e.clientY - 24}px`;
+
+    for (const other of gridEl.querySelectorAll('.icon-tile')) other.classList.remove('icon-tile--drop-target');
+    const dropTarget = elementUnderPoint(gridEl, e.clientX, e.clientY);
+    if (dropTarget && dropTarget !== tile) dropTarget.classList.add('icon-tile--drop-target');
+  });
+
+  tile.addEventListener('pointerup', async (e) => {
+    pointerDown = false;
+    if (!dragging) return;
+    dragging = false;
+    ghost?.remove();
+    ghost = null;
+    tile.style.opacity = '';
+    for (const other of gridEl.querySelectorAll('.icon-tile')) other.classList.remove('icon-tile--drop-target');
+
+    const dropTarget = elementUnderPoint(gridEl, e.clientX, e.clientY);
+    if (!myDomain) return;
+    let layout = getDesktopLayout(myDomain.id);
+
+    if (!dropTarget || dropTarget === tile) {
+      // Dropped on empty grid space, or back on itself — treat as a
+      // reorder to the nearest position (or a no-op if it's itself).
+      return;
+    }
+
+    const targetIndex = Number(dropTarget.dataset.index);
+    const targetItem = layout[targetIndex];
+    if (targetItem?.kind === 'folder') {
+      layout = mergeIntoFolder(layout, index, targetItem.id);
+    } else {
+      layout = createFolderFromDrop(layout, index, targetIndex, () => `folder-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+    }
+    setDesktopLayout(myDomain.id, layout);
+    await renderAll();
+  });
+
+  tile.addEventListener('pointercancel', () => {
+    pointerDown = false;
+    dragging = false;
+    ghost?.remove();
+    ghost = null;
+    tile.style.opacity = '';
+  });
+}
+
+/** Hit-tests real screen coordinates against the grid's own tiles — simpler than YourMine's manual grid-cell math, since AIWA's desktop is a real CSS grid the browser already lays out; elementFromPoint reads that layout directly rather than recomputing it. */
+function elementUnderPoint(gridEl, x, y) {
+  const el = document.elementFromPoint(x, y);
+  return el?.closest('.icon-tile');
+}
+
+let openFolderId = null;
+
+function openFolderPanel(folderId) {
+  openFolderId = folderId;
+  renderFolderPanel();
+  document.getElementById('folder-panel').classList.remove('folder-panel-hidden');
+}
+function closeFolderPanel() {
+  openFolderId = null;
+  document.getElementById('folder-panel').classList.add('folder-panel-hidden');
+}
+
+function renderFolderPanel() {
+  if (!myDomain || !openFolderId) return;
+  const layout = getDesktopLayout(myDomain.id);
+  const folder = layout.find((it) => it.kind === 'folder' && it.id === openFolderId);
+  if (!folder) { closeFolderPanel(); return; }
+
+  const registry = myDomain.materializeModules();
+  document.getElementById('folder-panel-label').value = folder.label;
+  const listEl = document.getElementById('folder-panel-items');
+  listEl.innerHTML = '';
+  for (const moduleId of folder.moduleIds) {
+    const m = registry.modules[moduleId];
+    if (!m) continue;
+    const row = document.createElement('div');
+    row.className = 'folder-item-row';
+    row.innerHTML = `<div class="icon-glyph">${m.icon || '⬡'}</div><div class="folder-item-name" style="flex:1">${m.name}</div><button class="eject-btn" title="Remove from folder">↩</button>`;
+    row.querySelector('.folder-item-name').addEventListener('click', () => runModule(m));
+    row.querySelector('.icon-glyph').addEventListener('click', () => runModule(m));
+    row.querySelector('.eject-btn').addEventListener('click', async () => {
+      setDesktopLayout(myDomain.id, ejectFromFolder(getDesktopLayout(myDomain.id), openFolderId, moduleId));
+      await renderAll();
+    });
+    listEl.appendChild(row);
   }
 }
 
@@ -766,6 +929,7 @@ async function renderAll() {
   renderCommitScreen();
   renderContactsScreen();
   renderParametersScreen();
+  if (openFolderId) renderFolderPanel();
 }
 
 // ── Reconcile (testing-only peer) ────────────────────────────────────
@@ -997,6 +1161,12 @@ async function main() {
   document.getElementById('theme-select').addEventListener('change', (e) => {
     activeThemeId = e.target.value; // local display preference — deliberately never touches theta, myDomain, or any DAG state
     log(`Presentation switched to '${activeThemeId}' — no module, rank, or economic state changed (§27.5).`);
+  });
+  document.getElementById('folder-panel-close').addEventListener('click', closeFolderPanel);
+  document.getElementById('folder-panel-label').addEventListener('change', async (e) => {
+    if (!myDomain || !openFolderId) return;
+    setDesktopLayout(myDomain.id, renameFolder(getDesktopLayout(myDomain.id), openFolderId, e.target.value));
+    await renderAll();
   });
   document.getElementById('contacts-search').addEventListener('input', renderContactsScreen);
 
