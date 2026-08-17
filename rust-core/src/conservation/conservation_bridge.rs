@@ -159,13 +159,20 @@ mod tests {
         let genesis = dag.add_event(vec![], serde_json::json!({"type": "genesis"})).unwrap();
         let mut last = genesis.clone();
         let mut last_cadence: Option<String> = None;
+        let mut previous_vdf_output: Option<String> = None;
         for e in 1..=5 {
             let parent = last_cadence.clone().unwrap_or_else(|| genesis.clone());
             let mut parents = vec![parent, last.clone()];
             parents.dedup();
-            let id = dag.add_event(parents, serde_json::json!({"type": "cadence", "domain": domain, "epoch": e})).unwrap();
+            let seed = crate::economics::cadence_vdf::vdf_seed(domain, previous_vdf_output.as_deref().unwrap_or("genesis"));
+            let vdf_output = crate::economics::cadence_vdf::compute_vdf_chain(&seed, 50);
+            let id = dag.add_event(parents, serde_json::json!({
+                "type": "cadence", "domain": domain, "epoch": e,
+                "vdfIterations": 50, "vdfOutput": vdf_output,
+            })).unwrap();
             last_cadence = Some(id.clone());
             last = id;
+            previous_vdf_output = Some(vdf_output);
         }
         dag.add_event(vec![last], serde_json::json!({"type": "accrual", "domain": domain, "b": 10.0, "q0": 0, "T": 0.0})).unwrap()
     }
