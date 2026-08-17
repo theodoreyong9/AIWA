@@ -19,6 +19,47 @@
 // worst it inconveniences the victim's own accounting. 'transfer' is
 // the event that actually moves value to someone else, which is
 // exactly why it — and only it — requires proof of control.
+//
+// A real, separate vulnerability was found while wiring the jackpot
+// module, not caused by it: this file's own claim-issue handler never
+// actually checked whether the issuing domain had enough real balance
+// — g.js's reducer correctly rejects an over-issuance (the balance
+// goes nowhere), but this file, folding the SAME event independently,
+// created the claim anyway, since it never looked at G's verdict at
+// all. Confirmed directly: a domain that has accrued nothing could
+// still end up with a real, spendable Conservation claim for any
+// amount. Closed WITHOUT duplicating G's own reward-formula-dependent
+// balance logic here (which would create exactly the kind of two-
+// independent-copies drift risk this project has hit before, e.g.
+// domain-id.js's own near-miss) — instead, materializeConservation()
+// now optionally receives the set of event ids G's own fold already
+// rejected, and simply defers to that verdict for claim-issue events,
+// treating G as the one authoritative source for "was there really
+// enough balance," which is already its job. See main.js's own
+// two-phase materializeConservation() for how the two are threaded
+// together.
+//
+// 'pot-release' (added for the jackpot module, the project's first
+// real causal contract beyond a plain transfer) is the one deliberate
+// exception to "transfer requires a signature," and it is safe for a
+// precise reason, not despite missing one: a pot address (e.g.
+// 'jackpot-pot:cycle-3') has no keypair, by design — nobody CAN sign
+// on its behalf, ever, so requiring a signature here would make the
+// pot's contents permanently unspendable rather than protect anything.
+// Authorization instead comes from recomputation: an injected
+// verifyPotRelease(claimId, from, to, releaseProof, conservationState)
+// function — supplied by the caller, never hardcoded here, matching
+// the exact injected-dependency pattern module-submission.js's
+// checkEligibilityFn already uses — must independently confirm the
+// release is exactly what the deterministic contract governing that
+// pot says it should be. Safe by default: if no verifier is supplied,
+// every pot-release is rejected outright, the same "absence reproduces
+// the safe prior behavior" discipline checkEligibilityFn's own
+// omission already guarantees. A forged pot-release cannot move a
+// normal domain's claims — the exception applies only to claims
+// already owned by a recognized pot address, which only ever
+// arrived there through an ordinary, already-signed, already-verified
+// transfer in the first place.
 
 import { ed25519 } from '@noble/curves/ed25519';
 import { initialConservationState, issueClaim, transfer } from './conservation.js';
@@ -79,13 +120,23 @@ async function verifyTransferAuthorization(event) {
 /**
  * @param {ConservationBridgeState} state
  * @param {{ id: string, parents: string[], payload: any }} event
+ * @param {(claimId: string, from: string, to: string, releaseProof: any, conservationState: import('./conservation.js').ConservationState) => (boolean | Promise<boolean>)} [verifyPotRelease]
+ *   Optional. Omitted entirely, every 'pot-release' event is rejected
+ *   — no deployment accidentally gains a signature-free transfer path
+ *   just by existing; a jackpot-style module must explicitly wire this
+ *   in (main.js does, via jackpot-reducer.js's verifyJackpotPayout()).
+ * @param {Set<string>} [gRejectedEventIds] — event ids g.js's own fold
+ *   rejected (insufficient balance, most commonly). A claim-issue event
+ *   in this set is rejected here too, deferring to G's verdict rather
+ *   than re-deriving balance independently — see this file's header.
  * @returns {Promise<ConservationBridgeState>}
  */
-export async function applyConservationEvent(state, event) {
+export async function applyConservationEvent(state, event, verifyPotRelease, gRejectedEventIds) {
   const payload = event.payload;
   if (!payload || typeof payload.type !== 'string') return state;
 
   if (payload.type === 'claim-issue') {
+    if (gRejectedEventIds?.has(event.id)) return state; // G rejected this — Conservation must agree, not silently diverge
     const { domain, id, kind, amount } = payload;
     if (typeof domain !== 'string' || !domain || typeof id !== 'string' || !id || !Number.isFinite(amount) || amount <= 0) {
       return state;
@@ -124,6 +175,32 @@ export async function applyConservationEvent(state, event) {
     }
   }
 
+  if (payload.type === 'pot-release') {
+    const { claimId, from, to, nonce, releaseProof } = payload;
+    if (typeof claimId !== 'string' || !claimId || typeof from !== 'string' || !from || typeof to !== 'string' || !to || typeof nonce !== 'string' || !nonce) {
+      return state;
+    }
+    if (state.usedTransferNonces[nonce]) {
+      return state; // replay — the exact same protection ordinary transfers already get
+    }
+    if (typeof verifyPotRelease !== 'function') {
+      return state; // no verifier wired in — every pot-release is rejected, full stop
+    }
+    let authorized;
+    try {
+      authorized = await verifyPotRelease(claimId, from, to, releaseProof, state.conservation);
+    } catch {
+      authorized = false; // a throwing verifier is a rejection, not a crash
+    }
+    if (!authorized) return state;
+    try {
+      const result = transfer(state.conservation, { claimId, from, to, n: 0, derivation: 'identity' }, { identity: (kind, amount) => ({ kind, amount }) });
+      return { conservation: result.state, usedTransferNonces: { ...state.usedTransferNonces, [nonce]: true } };
+    } catch {
+      return state;
+    }
+  }
+
   return state;
 }
 
@@ -132,11 +209,13 @@ export async function applyConservationEvent(state, event) {
  * list. Returns the same { conservation, usedTransferNonces } shape
  * applyConservationEvent does — callers that only need the claims
  * (existing code, existing tests) read `.conservation` off the result.
+ * `verifyPotRelease` and `gRejectedEventIds` are threaded through
+ * unchanged — see applyConservationEvent's own doc comment.
  */
-export async function materializeConservation(orderedEvents) {
+export async function materializeConservation(orderedEvents, verifyPotRelease, gRejectedEventIds) {
   let state = initialConservationBridgeState();
   for (const event of orderedEvents) {
-    state = await applyConservationEvent(state, event);
+    state = await applyConservationEvent(state, event, verifyPotRelease, gRejectedEventIds);
   }
   return state;
 }
