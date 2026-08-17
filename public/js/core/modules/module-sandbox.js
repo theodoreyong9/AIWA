@@ -50,9 +50,10 @@ import { DEFAULT_THEME, themeToCssVariables } from '../presentation/theme-tokens
  * presentation-independent, which is an opt-in property per module,
  * not something this project can enforce on code it doesn't control.
  */
-export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens) {
+export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens, myDomainId) {
   const escapedId = JSON.stringify(moduleId);
   const escapedTheme = JSON.stringify(themeTokens);
+  const escapedDomainId = JSON.stringify(myDomainId ?? null);
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${themeCss}</style></head><body><script>
 (function () {
   'use strict';
@@ -98,17 +99,56 @@ export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens) {
     commit: function (amount) { return callHost('commit', [amount]); },
     claim: function () { return callHost('claim', []); },
     theme: ${escapedTheme},
-    // Distinct from storage: durable, DAG-replicated, visible to any
-    // domain that reconciles with this one (public-profile-reducer.js)
-    // — never confuse this with storage.set, which stays private.
-    // value === null retracts a previously-published key.
-    share: function (key, value) { return callHost('share', [key, value]); },
+    // This domain's own real id, read-only, injected once at mount —
+    // needed by basically any contract module to construct events
+    // referencing "myself" (a donorDomain, a bid, a vote). Exposing it
+    // grants no new capability beyond what every other ctx call already
+    // implies (the host already knows and enforces this identity on
+    // every postCausalEvent/transferClaim call) — this just lets a
+    // module read the same value back rather than guess it.
+    myDomainId: ${escapedDomainId},
     // Real-time, peer-addressed — routed through the real transport
     // (§25) to the SAME module id running on the target domain, if it
     // is currently mounted there. Not durable, not part of H_d — this
     // is interaction, not a ledger fact.
     sendToPeer: function (peerId, data) { return callHost('sendToPeer', [peerId, data]); },
     onPeerMessage: function (callback) { peerMessageListeners.push(callback); },
+    // The one Conservation primitive that genuinely cannot be generic:
+    // a real, signed transfer requires the domain's real keypair, which
+    // this sandbox never holds and never will — the host signs, after
+    // the module only ever REQUESTS. Nothing about which claim moves
+    // where is decided by ctx; conservation-bridge.js's own signature
+    // check is what actually authorizes it (§7, Appendix H.18).
+    transferClaim: function (claimId, toDomainId) { return callHost('transferClaim', [claimId, toDomainId]); },
+    // General-purpose: posts ANY event type to this domain's own H_d.
+    // Deliberately the ONLY primitive a genuinely new kind of causal
+    // contract (a future auction, an escrow, a vote — anything beyond
+    // what this project has built so far) should ever need, so that
+    // adding one never means touching this file, the actual security
+    // boundary, again. This is safe for the same reason every other
+    // event in this whole architecture already is: posting an event is
+    // never itself an authorization — the RECEIVING reducer (a new
+    // one, written for whatever contract this is) is what decides
+    // whether to accept it, exactly like conservation-bridge.js already
+    // does for 'transfer' and jackpot-reducer.js already does for
+    // 'jackpot-donate'. The one rule that makes this safe regardless of
+    // what a module puts in \`payload\`: the host ALWAYS overwrites
+    // \`domain\` and \`postedBy\` with this domain's real, actual id
+    // before the event is ever posted — a module can request anything
+    // it likes, but can never claim to BE a different domain while
+    // doing it. A reducer that grants privilege based on any OTHER
+    // self-declared field (an amount, a claim id, a vote choice) is
+    // responsible for verifying that field itself, the same discipline
+    // every reducer in this project already follows.
+    postCausalEvent: function (type, payload) { return callHost('postCausalEvent', [type, payload]); },
+    // The read-side counterpart: asks the host to compute and return a
+    // named, already-materialized view (e.g. 'jackpot', 'myBalance',
+    // 'publicProfile') — read-only, so this is safe to make broad in
+    // the same spirit as postCausalEvent, without needing a bespoke
+    // ctx method per future view either. Which view names exist is the
+    // host's own registry (main.js), extendable there without ever
+    // touching this file — an unknown name simply resolves to null.
+    queryCausalState: function (viewName, params) { return callHost('queryCausalState', [viewName, params]); },
   };
 
   try {
@@ -141,11 +181,13 @@ export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens) {
  *   onToast: (moduleId: string, message: string, kind: string) => void,
  *   onCommit: (moduleId: string, amount: number) => Promise<void>,
  *   onClaim: (moduleId: string) => Promise<number>,
- *   onShare: (moduleId: string, key: string, value: any) => Promise<void>,
  *   onSendToPeer: (moduleId: string, peerId: string, data: any) => Promise<boolean>,
+ *   onTransferClaim: (moduleId: string, claimId: string, toDomainId: string) => Promise<boolean>,
+ *   onPostCausalEvent: (moduleId: string, type: string, payload: any) => Promise<any>,
+ *   onQueryCausalState: (moduleId: string, viewName: string, params: any) => Promise<any>,
  * }} hostHandlers
  */
-export async function mountModule(container, entry, code, verifyFn, hostHandlers, theme = DEFAULT_THEME) {
+export async function mountModule(container, entry, code, verifyFn, hostHandlers, theme = DEFAULT_THEME, myDomainId = null) {
   const ok = await verifyFn(code, entry.codeHash);
   if (!ok) {
     throw new Error(`Module '${entry.id}' failed integrity verification — fetched code does not match its registered hash. Refusing to mount.`);
@@ -157,7 +199,7 @@ export async function mountModule(container, entry, code, verifyFn, hostHandlers
   // that silently removes the sandbox — don't.
   iframe.setAttribute('sandbox', 'allow-scripts');
   iframe.style.cssText = 'width:100%;height:100%;border:0';
-  iframe.srcdoc = buildSandboxHtml(code, entry.id, themeToCssVariables(theme), theme);
+  iframe.srcdoc = buildSandboxHtml(code, entry.id, themeToCssVariables(theme), theme, myDomainId);
 
   const onMessage = async (event) => {
     if (event.source !== iframe.contentWindow) return;
@@ -177,8 +219,10 @@ export async function mountModule(container, entry, code, verifyFn, hostHandlers
       else if (msg.method === 'toast') result = hostHandlers.onToast(entry.id, msg.args[0], msg.args[1]);
       else if (msg.method === 'commit') result = await hostHandlers.onCommit(entry.id, msg.args[0]);
       else if (msg.method === 'claim') result = await hostHandlers.onClaim(entry.id);
-      else if (msg.method === 'share') result = await hostHandlers.onShare(entry.id, msg.args[0], msg.args[1]);
       else if (msg.method === 'sendToPeer') result = await hostHandlers.onSendToPeer(entry.id, msg.args[0], msg.args[1]);
+      else if (msg.method === 'transferClaim') result = await hostHandlers.onTransferClaim(entry.id, msg.args[0], msg.args[1]);
+      else if (msg.method === 'postCausalEvent') result = await hostHandlers.onPostCausalEvent(entry.id, msg.args[0], msg.args[1]);
+      else if (msg.method === 'queryCausalState') result = await hostHandlers.onQueryCausalState(entry.id, msg.args[0], msg.args[1]);
       else throw new Error(`Unknown ctx method: ${msg.method}`);
     } catch (err) {
       error = err.message;
