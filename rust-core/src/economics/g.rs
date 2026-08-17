@@ -183,12 +183,22 @@ impl GState {
 mod tests {
     use super::*;
 
-    fn cadence_event(id: &str, parents: Vec<String>, domain: &str, epoch: i64) -> Event {
+    const TEST_VDF_ITERATIONS: u64 = 50;
+
+    fn cadence_event(id: &str, parents: Vec<String>, domain: &str, epoch: i64, previous_vdf_output: Option<&str>) -> Event {
+        let seed = crate::economics::cadence_vdf::vdf_seed(domain, previous_vdf_output.unwrap_or("genesis"));
+        let vdf_output = crate::economics::cadence_vdf::compute_vdf_chain(&seed, TEST_VDF_ITERATIONS);
         Event {
             id: id.to_string(),
             parents,
-            payload: serde_json::json!({ "type": "cadence", "domain": domain, "epoch": epoch }),
+            payload: serde_json::json!({
+                "type": "cadence", "domain": domain, "epoch": epoch,
+                "vdfIterations": TEST_VDF_ITERATIONS, "vdfOutput": vdf_output,
+            }),
         }
+    }
+    fn vdf_output_of(event: &Event) -> String {
+        event.payload["vdfOutput"].as_str().unwrap().to_string()
     }
     fn accrual_event(id: &str, parents: Vec<String>, domain: &str, b: f64, q0: i64) -> Event {
         Event {
@@ -221,8 +231,10 @@ mod tests {
         let budgets = [("d1", None)];
         let t = theta(&budgets);
         let mut state = GState::new(&t);
-        state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
-        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
+        let c1 = cadence_event("c1", vec![], "d1", 1, None);
+        let c1_vdf = vdf_output_of(&c1);
+        state.apply_event(&t, &c1);
+        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2, Some(&c1_vdf)));
         // b=10 at q0=0, current epoch=2 -> q=2 -> r = 10 * max(1,2) = 20
         state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0));
         assert_eq!(state.balances.get("d1"), Some(&20.0));
@@ -233,8 +245,10 @@ mod tests {
         let budgets = [("d1", Some(15.0))];
         let t = theta(&budgets);
         let mut state = GState::new(&t);
-        state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
-        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
+        let c1 = cadence_event("c1", vec![], "d1", 1, None);
+        let c1_vdf = vdf_output_of(&c1);
+        state.apply_event(&t, &c1);
+        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2, Some(&c1_vdf)));
         state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0));
         assert_eq!(state.balances.get("d1"), Some(&15.0));
         assert_eq!(state.scarcity.domains["d1"].used, 15.0);
@@ -267,8 +281,10 @@ mod tests {
         let budgets = [("d1", None)];
         let t = theta(&budgets);
         let mut state = GState::new(&t);
-        state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
-        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
+        let c1 = cadence_event("c1", vec![], "d1", 1, None);
+        let c1_vdf = vdf_output_of(&c1);
+        state.apply_event(&t, &c1);
+        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2, Some(&c1_vdf)));
         let e = Event {
             id: "a1".to_string(),
             parents: vec!["c2".to_string()],
@@ -283,8 +299,10 @@ mod tests {
         let budgets = [("d1", None)];
         let t = theta(&budgets);
         let mut state = GState::new(&t);
-        state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
-        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
+        let c1 = cadence_event("c1", vec![], "d1", 1, None);
+        let c1_vdf = vdf_output_of(&c1);
+        state.apply_event(&t, &c1);
+        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2, Some(&c1_vdf)));
         state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0)); // balance = 20
         let e = Event {
             id: "ci1".to_string(),
@@ -300,8 +318,10 @@ mod tests {
         let budgets = [("d1", None)];
         let t = theta(&budgets);
         let mut state = GState::new(&t);
-        state.apply_event(&t, &cadence_event("c1", vec![], "d1", 1));
-        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2));
+        let c1 = cadence_event("c1", vec![], "d1", 1, None);
+        let c1_vdf = vdf_output_of(&c1);
+        state.apply_event(&t, &c1);
+        state.apply_event(&t, &cadence_event("c2", vec!["c1".to_string()], "d1", 2, Some(&c1_vdf)));
         state.apply_event(&t, &accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0)); // balance = 20
         let e = Event {
             id: "ci1".to_string(),
@@ -317,10 +337,12 @@ mod tests {
     fn out_of_causal_order_accrual_sees_the_cadence_state_as_folded_so_far() {
         let budgets = [("d1", None)];
         let t = theta(&budgets);
+        let c1 = cadence_event("c1", vec![], "d1", 1, None);
+        let c1_vdf = vdf_output_of(&c1);
         let events = vec![
             accrual_event("a1", vec!["c2".to_string()], "d1", 10.0, 0), // fed first, out of order
-            cadence_event("c1", vec![], "d1", 1),
-            cadence_event("c2", vec!["c1".to_string()], "d1", 2),
+            c1,
+            cadence_event("c2", vec!["c1".to_string()], "d1", 2, Some(&c1_vdf)),
         ];
         let refs: Vec<&Event> = events.iter().collect();
         let state = GState::materialize(&t, &refs);
