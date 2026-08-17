@@ -130,8 +130,8 @@ export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens, my
     // never itself an authorization — the RECEIVING reducer (a new
     // one, written for whatever contract this is) is what decides
     // whether to accept it, exactly like conservation-bridge.js already
-    // does for 'transfer' and jackpot-reducer.js already does for
-    // 'jackpot-donate'. The one rule that makes this safe regardless of
+    // does for 'transfer' and pool-reducer.js already does for
+    // 'pool-contribute'. The one rule that makes this safe regardless of
     // what a module puts in \`payload\`: the host ALWAYS overwrites
     // \`domain\` and \`postedBy\` with this domain's real, actual id
     // before the event is ever posted — a module can request anything
@@ -142,7 +142,7 @@ export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens, my
     // every reducer in this project already follows.
     postCausalEvent: function (type, payload) { return callHost('postCausalEvent', [type, payload]); },
     // The read-side counterpart: asks the host to compute and return a
-    // named, already-materialized view (e.g. 'jackpot', 'myBalance',
+    // named, already-materialized view (e.g. 'pool', 'myBalance',
     // 'publicProfile') — read-only, so this is safe to make broad in
     // the same spirit as postCausalEvent, without needing a bespoke
     // ctx method per future view either. Which view names exist is the
