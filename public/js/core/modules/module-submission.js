@@ -198,6 +198,23 @@ export async function submitModule(registryState, submissionState, event, code, 
 
   const alreadyRegistered = Boolean(registryState.modules[event.moduleId]);
 
+  // SECURITY: an update to an EXISTING module id is only ever valid
+  // from the same signer who originally registered it — found as a
+  // real, exploitable gap, not a hypothetical: neither this function
+  // nor updateModuleCode() itself checked this at all, meaning any
+  // validly-signed submission could overwrite ANY module's code and
+  // codeUrl regardless of who registered it, while the displayed
+  // `author` field stayed the original author's — an attacker's code,
+  // credited to someone who never touched it. New registration stays
+  // exactly as open as before (no author allow-list, §27.4) — this
+  // check applies only once a module id already exists.
+  if (alreadyRegistered && registryState.modules[event.moduleId].author !== event.signerPubkey) {
+    return {
+      registryState, submissionState, accepted: false,
+      reason: `module '${event.moduleId}' is already registered by a different author — only the original author's signature can update it`,
+    };
+  }
+
   let eligibility = null;
   if (!alreadyRegistered && checkEligibilityFn) {
     const lastSubmission = submissionState.lastSubmissionByAuthor[event.signerPubkey] ?? null;
