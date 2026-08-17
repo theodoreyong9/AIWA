@@ -202,6 +202,25 @@ pub fn submit_module(
 
     let already_registered = registry_state.modules.contains_key(&event.module_id);
 
+    // SECURITY: an update to an EXISTING module id is only ever valid
+    // from the same signer who originally registered it — see the JS
+    // mirror's identical fix for the full account of how this was
+    // found (a real, exploitable gap, not hypothetical): neither this
+    // function nor update_module_code() checked this at all, meaning
+    // any validly-signed submission could overwrite ANY module's code
+    // regardless of who registered it, while the displayed author
+    // field stayed the original author's.
+    if already_registered {
+        let original_author = &registry_state.modules[&event.module_id].author;
+        if *original_author != event.signer_pubkey {
+            return SubmitOutcome {
+                accepted: false,
+                is_update: false,
+                reason: Some(format!("module '{}' is already registered by a different author — only the original author's signature can update it", event.module_id)),
+            };
+        }
+    }
+
     let mut fresh_submission: Option<LastSubmission> = None;
     if !already_registered {
         if let Some(f) = check_eligibility_fn {
@@ -386,6 +405,10 @@ mod tests {
         assert_eq!(registry.modules["mymodule.js"].audit_status, AuditStatus::Unaudited);
     }
 
+    // ── checkSubmissionEligibility, actually wired in ──────────────
+    // Built and tested in module_rank.rs since an earlier phase, never
+    // actually called from this pipeline until now.
+
     fn event_with_id(signer: &SigningKey, module_id: &str, code_hash: &str, nonce: &str) -> SubmissionEvent {
         build_submission_event(
             module_id, code_hash, &format!("https://example.com/{module_id}"), module_id, "🔮", "Tools", "Does a thing.",
@@ -453,6 +476,7 @@ mod tests {
         let f1 = eligibility_fn(1000.0, 10.0);
         submit_module(&mut registry, &mut submissions, &event_v1, code_v1, 1000, Some(&f1));
 
+        // Same author updates the SAME id, rank has since cratered.
         let code_v2 = "const v = 2;";
         let hash_v2 = compute_module_hash(code_v2);
         let event_v2 = event_with_id(&signer, "mine.js", &hash_v2, "n2");
@@ -479,6 +503,11 @@ mod tests {
 
     #[test]
     fn record_nonce_preserves_last_submission_by_author_for_other_authors() {
+        // Rust's &mut discipline avoids the exact bug JS's immutable
+        // recordNonce() had (a fresh {usedNonces} object silently
+        // dropping every other field) — this test exists to confirm
+        // that structural guarantee holds here too, not because the
+        // same bug was found in this file.
         let alice = make_signer();
         let bob = make_signer();
         let mut registry = ModuleRegistryState::new();
@@ -499,5 +528,74 @@ mod tests {
 
         assert!(submissions.last_submission_by_author.contains_key(&alice_event.signer_pubkey));
         assert!(submissions.last_submission_by_author.contains_key(&bob_event.signer_pubkey));
+    }
+
+    // ── SECURITY: module hijacking via update ──────────────────────
+    // Found the same way as the JS mirror: asked directly how module
+    // updates actually work, which led to checking whether the update
+    // path verified the signer against the module's original author —
+    // it did not, in either language.
+
+    #[test]
+    fn security_a_different_signer_cannot_hijack_a_module_via_update() {
+        let alice = make_signer();
+        let attacker = make_signer();
+
+        let alice_code = "const legit = true;";
+        let alice_hash = compute_module_hash(alice_code);
+        let alice_event = event_with_id(&alice, "weather.js", &alice_hash, "n1");
+        let mut registry = ModuleRegistryState::new();
+        let mut submissions = SubmissionState::default();
+        let r1 = submit_module(&mut registry, &mut submissions, &alice_event, alice_code, 1000, None);
+        assert!(r1.accepted);
+
+        let evil_code = "const malicious = true;";
+        let evil_hash = compute_module_hash(evil_code);
+        let evil_event = event_with_id(&attacker, "weather.js", &evil_hash, "n2");
+        let r2 = submit_module(&mut registry, &mut submissions, &evil_event, evil_code, 1001, None);
+
+        assert!(!r2.accepted, "a different signer must never be able to overwrite an existing module's code");
+        assert!(r2.reason.unwrap().contains("only the original author"));
+        assert_eq!(registry.modules["weather.js"].code_hash, alice_hash);
+        assert_eq!(registry.modules["weather.js"].author, alice_event.signer_pubkey);
+    }
+
+    #[test]
+    fn the_original_author_can_still_update_their_own_module() {
+        let alice = make_signer();
+        let code_v1 = "const v = 1;";
+        let hash_v1 = compute_module_hash(code_v1);
+        let event_v1 = event_with_id(&alice, "weather.js", &hash_v1, "n1");
+        let mut registry = ModuleRegistryState::new();
+        let mut submissions = SubmissionState::default();
+        submit_module(&mut registry, &mut submissions, &event_v1, code_v1, 1000, None);
+
+        let code_v2 = "const v = 2;";
+        let hash_v2 = compute_module_hash(code_v2);
+        let event_v2 = event_with_id(&alice, "weather.js", &hash_v2, "n2");
+        let r2 = submit_module(&mut registry, &mut submissions, &event_v2, code_v2, 1001, None);
+
+        assert!(r2.accepted);
+        assert_eq!(registry.modules["weather.js"].code_hash, hash_v2);
+    }
+
+    #[test]
+    fn a_new_module_id_remains_open_to_any_author() {
+        let alice = make_signer();
+        let bob = make_signer();
+        let mut registry = ModuleRegistryState::new();
+        let mut submissions = SubmissionState::default();
+
+        let alice_code = "const a = 1;";
+        let alice_hash = compute_module_hash(alice_code);
+        let alice_event = event_with_id(&alice, "alice-only.js", &alice_hash, "n1");
+        submit_module(&mut registry, &mut submissions, &alice_event, alice_code, 1000, None);
+
+        let bob_code = "const b = 1;";
+        let bob_hash = compute_module_hash(bob_code);
+        let bob_event = event_with_id(&bob, "bob-new.js", &bob_hash, "n2");
+        let r2 = submit_module(&mut registry, &mut submissions, &bob_event, bob_code, 1001, None);
+
+        assert!(r2.accepted, "registering a genuinely new, different module id must remain open to anyone");
     }
 }
