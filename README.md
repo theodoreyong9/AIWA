@@ -1719,3 +1719,58 @@ previous update to this README.)
   the rename produced identical behavior. New whitepaper §27.8 naming
   note. 301 JS tests total (unchanged count — a pure rename, no new
   behavior).
+- **Closed R11 (cadence integrity)** — found by one direct question
+  (does the mandatory heartbeat already bound the RATE of cadence
+  advancement?) and one direct pushback on an initially incomplete
+  answer. It did not: §16.1's own text already separates observability
+  (heartbeat, detecting silence) from economic time (the epoch
+  counter), and nothing before this stopped a domain from constructing
+  a thousand structurally-valid, correctly-chained cadence transitions
+  within milliseconds of real time.
+  **The mechanism**: a sequential hash chain (`cadence-vdf.js` /
+  `cadence_vdf.rs`) — `h_i = SHA-256(h_{i-1})`, non-parallelizable by
+  construction, seeded from the domain and the PRIOR epoch's own real
+  output, so epoch N's proof cannot even begin without epoch N-1's
+  real result. Verification means recomputing the chain — the same
+  recompute-don't-trust discipline this project already applies to
+  event ids, module hashes, and formula parity, applied here for the
+  first time to elapsed real time. Now mandatory on every cadence
+  transition in both languages.
+  **Byte-for-byte cross-language parity confirmed on the first
+  attempt**: an independently JS-computed value matched Rust's own
+  `sha2`-crate output exactly for the identical (seed, iterations)
+  pair — with one real transcription slip (a 63-character value, one
+  hex digit short of a real digest) caught before use by checking the
+  real length in two independent tools rather than trusting a
+  hand-copy.
+  **A genuine, previously-dormant Rust bug surfaced by this, unrelated
+  to the VDF logic itself**: `self.domains.entry(domain).or_default()`
+  silently inserts a zombie entry into the map as a side effect of
+  Rust's own Entry API, even when the triggering transition is then
+  rejected — no test before this ever checked map membership after
+  such a rejection. Closed with a pure, non-mutating `.get().cloned()`
+  read instead.
+  **Honest, stated limitations, not discovered later**: not a true
+  asymmetric VDF (verification costs what computation costs — a real
+  Wesolowski/Pietrzak construction is a separate, larger undertaking
+  this project doesn't attempt); difficulty is hardware-relative, not
+  market-revealed (same caveat local-pow.js's retraction already
+  named, though that retraction's own reasoning doesn't transfer here
+  — cadence must keep advancing DURING a partition, unlike identity
+  cost); and this closes ONE domain's own timeline, not parallel Sybil
+  advancement across many domains (§24) — a different, still-open
+  concern.
+  Wiring this in as mandatory (the only choice that actually closes
+  R11 for a real deployment) meant updating every cadence-constructing
+  call site in both languages — 11 JS test files including the shared
+  cross-language fixture `test-vectors/g-scenario.json` (missed by an
+  initial grep sweep since its cadence events live in JSON data, only
+  caught by running the full suite together), plus `cadence.rs`,
+  `g.rs`, and `conservation_bridge.rs` on the Rust side. Real, deployed
+  wiring in `main.js`: `advanceCadence()` now computes a genuine proof
+  before posting, with the iteration count a configurable
+  Parameters-screen value (default 200,000, ~240ms), never a hardcoded
+  constant — matching Δ's own already-documented deployment-
+  configuration discipline. New whitepaper §16.2, R11 closed in the
+  §17 matrix, Appendix H.30. 319 JS tests (was 301), 152 Rust tests
+  (was 134), zero warnings either language.
