@@ -40,6 +40,9 @@ import { collectContextSnapshot, buildIdeaSystemPrompt, sanitizeIdeaReply } from
 import { detectWebGpuSupport, loadEngine, streamChat } from '../core/ai/webllm-engine.js';
 import { materializePublicProfiles, publishedDataForDomain } from '../core/profile/public-profile-reducer.js';
 import {
+  potAddress, materializeJackpot, verifyJackpotPayout,
+} from '../core/jackpot/jackpot-reducer.js';
+import {
   layoutFromPinnedIds, allModuleIdsInLayout, moveItem, createFolderFromDrop,
   mergeIntoFolder, ejectFromFolder, renameFolder, removeModuleFromLayout,
 } from '../core/desktop/desktop-layout.js';
@@ -264,14 +267,43 @@ class DomainReplica {
     }
   }
 
-  async materializeConservation() { return materializeConservation(this.dag.topoOrder()); }
+  /**
+   * Two-phase materialization, not circular despite the mutual
+   * dependency it looks like at first: jackpot state needs
+   * Conservation's real claim ownership to verify donations are real
+   * (§ jackpot-reducer.js's own header); Conservation needs jackpot
+   * state to verify 'pot-release' events. Resolved the same way every
+   * other cross-reducer dependency in this project is — an explicit,
+   * ordered pass, not a hidden import: (1) materialize Conservation
+   * with no pot-release verifier at all (the safe default — every
+   * pot-release is rejected, so this first pass simply excludes any
+   * payouts that haven't happened yet); (2) materialize jackpot state
+   * from that; (3) re-materialize Conservation, now with a real
+   * verifier closing over the jackpot state from step 2, so legitimate
+   * pot-release events are finally recognized and applied. A claim
+   * that has already been legitimately released can never be
+   * re-donated regardless of which pass computed a given check against
+   * it — the ownership test alone already prevents that — so this
+   * two-pass order changes nothing about which donations are valid,
+   * only whether payouts already made are reflected in the final view.
+   */
+  async materializeConservation() {
+    const events = this.dag.topoOrder();
+    const provisional = await materializeConservation(events);
+    const jackpotState = materializeJackpot(events, provisional.conservation);
+    const verifyPotRelease = (claimId, from, to, releaseProof, conservationState) =>
+      verifyJackpotPayout(jackpotState, conservationState, claimId, from, to, releaseProof);
+    return materializeConservation(events, verifyPotRelease);
+  }
+
+  /** The jackpot view alone — most callers (the plugin's own UI) want this directly, not Conservation's full state. */
+  async materializeJackpot() {
+    const events = this.dag.topoOrder();
+    const conservationState = await materializeConservation(events);
+    return materializeJackpot(events, conservationState.conservation);
+  }
   materializePublicProfiles() { return materializePublicProfiles(this.dag.topoOrder()); }
 
-  /** Publishes (or, with value=null, retracts) one key of a module's public data — a real DAG event, propagated by merge() like everything else. */
-  async publishModuleData(moduleId, key, value) {
-    const id = await this.dag.addEvent([this.lastEventId], { type: 'module-data-published', domain: this.id, moduleId, key, value, at: this.epoch });
-    this.lastEventId = id;
-  }
   materializeIdentity() { return materializeIdentity(this.dag.topoOrder()); }
 
   /**
@@ -503,18 +535,86 @@ async function runModule(entry) {
       await renderAll();
       return n;
     },
-    async onShare(moduleId, key, value) {
-      await myDomain.publishModuleData(moduleId, key, value);
-      log(`[plugin:${moduleId}] ${value === null ? 'retracted' : 'published'} '${key}'`);
-    },
     async onSendToPeer(moduleId, peerId, data) {
       const delivered = await myDomain.transport.send(peerId, { type: 'module-message', moduleId, data });
       if (!delivered) log(`[plugin:${moduleId}] message to '${peerId}' queued — simulated link is down`);
       return delivered;
     },
+    /**
+     * The one Conservation primitive that genuinely cannot be generic:
+     * a real, signed transfer, using the domain's real keypair, which
+     * this handler holds and the sandboxed module never does. The
+     * module only ever names WHICH claim and WHERE — it cannot forge
+     * the `from`, since the signature itself is what proves control,
+     * exactly as conservation-bridge.js already requires for every
+     * transfer regardless of source (§7, Appendix H.18).
+     */
+    async onTransferClaim(moduleId, claimId, toDomainId) {
+      const seed = myDomain.keypair.secretKey.slice(0, 32);
+      const pubkeyBytes = myDomain.keypair.publicKey.toBytes();
+      const event = buildSignedTransferEvent({ claimId, from: myDomain.id, to: toDomainId }, seed, pubkeyBytes);
+      const id = await myDomain.dag.addEvent([myDomain.lastEventId], { type: 'transfer', ...event });
+      myDomain.lastEventId = id;
+      log(`[plugin:${moduleId}] transferred claim '${claimId}' to '${toDomainId}'`);
+      await renderAll();
+      return true;
+    },
+    /**
+     * The one general-purpose primitive for everything else — see
+     * module-sandbox.js's own note on why this replaces what would
+     * otherwise be a new bespoke ctx method per future contract.
+     * `domain` and `postedBy` are ALWAYS forced to this domain's real
+     * id here, overwriting anything the module supplied — this single
+     * rule is what makes an otherwise-unrestricted event type safe to
+     * post: a module can request anything, but can never claim to BE a
+     * different domain while doing it. Whether the event is actually
+     * ACCEPTED is entirely up to whichever reducer folds this event
+     * type — this handler does not know or care what 'jackpot-donate'
+     * or any other type means, on purpose.
+     */
+    async onPostCausalEvent(moduleId, type, payload) {
+      if (typeof type !== 'string' || !type) throw new Error('event type is required');
+      const finalPayload = { ...payload, type, domain: myDomain.id, postedBy: myDomain.id, at: myDomain.epoch };
+      const id = await myDomain.dag.addEvent([myDomain.lastEventId], finalPayload);
+      myDomain.lastEventId = id;
+      log(`[plugin:${moduleId}] posted '${type}' event`);
+      await renderAll();
+      return id;
+    },
+    /**
+     * The read-side counterpart to postCausalEvent — a small, named
+     * registry of materialized views a module may ask for. Extending
+     * this to cover a future contract's own view is a change HERE
+     * only, never to module-sandbox.js's own security boundary. Every
+     * view returned is read-only data; nothing about calling this can
+     * mutate anything.
+     */
+    async onQueryCausalState(moduleId, viewName, params) {
+      if (viewName === 'jackpot') return await myDomain.materializeJackpot();
+      if (viewName === 'myBalance') return (myDomain.materialize()).balances[myDomain.id] ?? 0;
+      if (viewName === 'myClaims') {
+        const conState = await myDomain.materializeConservation();
+        return Object.values(conState.conservation.claims).filter((c) => c.owner === myDomain.id && c.status === 'active');
+      }
+      if (viewName === 'potClaims' && params?.potId) {
+        const conState = await myDomain.materializeConservation();
+        return Object.values(conState.conservation.claims).filter((c) => c.owner === potAddress(params.potId) && c.status === 'active');
+      }
+      if (viewName === 'jackpotDraw' && params?.potId && Number.isInteger(params?.cycleIndex)) {
+        const jackpotState = await myDomain.materializeJackpot();
+        const cycle = jackpotState.cycles[params.potId]?.[params.cycleIndex];
+        if (!cycle) return null;
+        const { computeDraw } = await import('../core/jackpot/jackpot-reducer.js');
+        return computeDraw(params.potId, params.cycleIndex, cycle.donations);
+      }
+      if (viewName === 'publicProfile' && params?.domainId) {
+        return publishedDataForDomain(myDomain.materializePublicProfiles(), params.domainId);
+      }
+      return null; // unknown view name — degrade to null, never throw, so a module querying a not-yet-registered view fails gracefully
+    },
   };
 
-  activePluginHandle = await mountModule(containerEl, entry, code, verifyModuleIntegrity, hostHandlers, getTheme(activeThemeId));
+  activePluginHandle = await mountModule(containerEl, entry, code, verifyModuleIntegrity, hostHandlers, getTheme(activeThemeId), myDomain.id);
   activePluginModuleId = entry.id; // so an inbound transport message tagged for this module id can find its way in — see wireInboundModuleMessages()
   log(`[${myDomain.id}] running '${entry.id}' in a sandboxed iframe`);
 }
