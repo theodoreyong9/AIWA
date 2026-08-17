@@ -40,8 +40,8 @@ import { collectContextSnapshot, buildIdeaSystemPrompt, sanitizeIdeaReply } from
 import { detectWebGpuSupport, loadEngine, streamChat } from '../core/ai/webllm-engine.js';
 import { materializePublicProfiles, publishedDataForDomain } from '../core/profile/public-profile-reducer.js';
 import {
-  potAddress, materializeJackpot, verifyJackpotPayout,
-} from '../core/jackpot/jackpot-reducer.js';
+  potAddress, materializePool, verifyPoolPayout,
+} from '../core/pool/pool-reducer.js';
 import {
   layoutFromPinnedIds, allModuleIdsInLayout, moveItem, createFolderFromDrop,
   mergeIntoFolder, ejectFromFolder, renameFolder, removeModuleFromLayout,
@@ -269,38 +269,40 @@ class DomainReplica {
 
   /**
    * Two-phase materialization, not circular despite the mutual
-   * dependency it looks like at first: jackpot state needs
-   * Conservation's real claim ownership to verify donations are real
-   * (§ jackpot-reducer.js's own header); Conservation needs jackpot
-   * state to verify 'pot-release' events. Resolved the same way every
-   * other cross-reducer dependency in this project is — an explicit,
-   * ordered pass, not a hidden import: (1) materialize Conservation
-   * with no pot-release verifier at all (the safe default — every
-   * pot-release is rejected, so this first pass simply excludes any
-   * payouts that haven't happened yet); (2) materialize jackpot state
-   * from that; (3) re-materialize Conservation, now with a real
-   * verifier closing over the jackpot state from step 2, so legitimate
-   * pot-release events are finally recognized and applied. A claim
-   * that has already been legitimately released can never be
-   * re-donated regardless of which pass computed a given check against
-   * it — the ownership test alone already prevents that — so this
-   * two-pass order changes nothing about which donations are valid,
-   * only whether payouts already made are reflected in the final view.
+   * dependency it looks like at first: pool state needs Conservation's
+   * real claim ownership to verify contributions are real (§
+   * pool-reducer.js's own header — the general causal-contract
+   * primitive a real community jackpot is one application of, not what
+   * this mechanism is specifically for); Conservation needs pool state
+   * to verify 'pot-release' events. Resolved the same way every other
+   * cross-reducer dependency in this project is — an explicit, ordered
+   * pass, not a hidden import: (1) materialize Conservation with no
+   * pot-release verifier at all (the safe default — every pot-release
+   * is rejected, so this first pass simply excludes any payouts that
+   * haven't happened yet); (2) materialize pool state from that; (3)
+   * re-materialize Conservation, now with a real verifier closing over
+   * the pool state from step 2, so legitimate pot-release events are
+   * finally recognized and applied. A claim that has already been
+   * legitimately released can never be re-contributed regardless of
+   * which pass computed a given check against it — the ownership test
+   * alone already prevents that — so this two-pass order changes
+   * nothing about which contributions are valid, only whether payouts
+   * already made are reflected in the final view.
    */
   async materializeConservation() {
     const events = this.dag.topoOrder();
     const provisional = await materializeConservation(events);
-    const jackpotState = materializeJackpot(events, provisional.conservation);
+    const poolState = materializePool(events, provisional.conservation);
     const verifyPotRelease = (claimId, from, to, releaseProof, conservationState) =>
-      verifyJackpotPayout(jackpotState, conservationState, claimId, from, to, releaseProof);
+      verifyPoolPayout(poolState, conservationState, claimId, from, to, releaseProof);
     return materializeConservation(events, verifyPotRelease);
   }
 
-  /** The jackpot view alone — most callers (the plugin's own UI) want this directly, not Conservation's full state. */
-  async materializeJackpot() {
+  /** The pool view alone — most callers (a plugin's own UI, e.g. the jackpot example) want this directly, not Conservation's full state. */
+  async materializePool() {
     const events = this.dag.topoOrder();
     const conservationState = await materializeConservation(events);
-    return materializeJackpot(events, conservationState.conservation);
+    return materializePool(events, conservationState.conservation);
   }
   materializePublicProfiles() { return materializePublicProfiles(this.dag.topoOrder()); }
 
@@ -569,7 +571,7 @@ async function runModule(entry) {
      * post: a module can request anything, but can never claim to BE a
      * different domain while doing it. Whether the event is actually
      * ACCEPTED is entirely up to whichever reducer folds this event
-     * type — this handler does not know or care what 'jackpot-donate'
+     * type — this handler does not know or care what 'pool-contribute'
      * or any other type means, on purpose.
      */
     async onPostCausalEvent(moduleId, type, payload) {
@@ -590,22 +592,22 @@ async function runModule(entry) {
      * mutate anything.
      */
     async onQueryCausalState(moduleId, viewName, params) {
-      if (viewName === 'jackpot') return await myDomain.materializeJackpot();
+      if (viewName === 'pool') return await myDomain.materializePool();
       if (viewName === 'myBalance') return (myDomain.materialize()).balances[myDomain.id] ?? 0;
       if (viewName === 'myClaims') {
         const conState = await myDomain.materializeConservation();
         return Object.values(conState.conservation.claims).filter((c) => c.owner === myDomain.id && c.status === 'active');
       }
-      if (viewName === 'potClaims' && params?.potId) {
+      if (viewName === 'poolClaims' && params?.poolId) {
         const conState = await myDomain.materializeConservation();
-        return Object.values(conState.conservation.claims).filter((c) => c.owner === potAddress(params.potId) && c.status === 'active');
+        return Object.values(conState.conservation.claims).filter((c) => c.owner === potAddress(params.poolId) && c.status === 'active');
       }
-      if (viewName === 'jackpotDraw' && params?.potId && Number.isInteger(params?.cycleIndex)) {
-        const jackpotState = await myDomain.materializeJackpot();
-        const cycle = jackpotState.cycles[params.potId]?.[params.cycleIndex];
+      if (viewName === 'poolDraw' && params?.poolId && Number.isInteger(params?.cycleIndex)) {
+        const poolState = await myDomain.materializePool();
+        const cycle = poolState.cycles[params.poolId]?.[params.cycleIndex];
         if (!cycle) return null;
-        const { computeDraw } = await import('../core/jackpot/jackpot-reducer.js');
-        return computeDraw(params.potId, params.cycleIndex, cycle.donations);
+        const { computeWeightedDraw } = await import('../core/pool/pool-reducer.js');
+        return computeWeightedDraw(params.poolId, params.cycleIndex, cycle.contributions);
       }
       if (viewName === 'publicProfile' && params?.domainId) {
         return publishedDataForDomain(myDomain.materializePublicProfiles(), params.domainId);
