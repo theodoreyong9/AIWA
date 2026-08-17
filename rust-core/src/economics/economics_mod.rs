@@ -1,4 +1,5 @@
 pub mod cadence;
+pub mod cadence_vdf;
 pub mod formula_registry_reducer;
 pub mod g;
 pub mod reward;
