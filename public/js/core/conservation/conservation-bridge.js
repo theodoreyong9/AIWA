@@ -20,17 +20,17 @@
 // the event that actually moves value to someone else, which is
 // exactly why it — and only it — requires proof of control.
 //
-// A real, separate vulnerability was found while wiring the jackpot
-// module, not caused by it: this file's own claim-issue handler never
-// actually checked whether the issuing domain had enough real balance
-// — g.js's reducer correctly rejects an over-issuance (the balance
-// goes nowhere), but this file, folding the SAME event independently,
-// created the claim anyway, since it never looked at G's verdict at
-// all. Confirmed directly: a domain that has accrued nothing could
-// still end up with a real, spendable Conservation claim for any
-// amount. Closed WITHOUT duplicating G's own reward-formula-dependent
-// balance logic here (which would create exactly the kind of two-
-// independent-copies drift risk this project has hit before, e.g.
+// A real, separate vulnerability was found while wiring the pool
+// module below, not caused by it: this file's own claim-issue handler
+// never actually checked whether the issuing domain had enough real
+// balance — g.js's reducer correctly rejects an over-issuance (the
+// balance goes nowhere), but this file, folding the SAME event
+// independently, created the claim anyway, since it never looked at
+// G's verdict at all. Confirmed directly: a domain that has accrued
+// nothing could still end up with a real, spendable Conservation claim
+// for any amount. Closed WITHOUT duplicating G's own reward-formula-
+// dependent balance logic here (which would create exactly the kind of
+// two-independent-copies drift risk this project has hit before, e.g.
 // domain-id.js's own near-miss) — instead, materializeConservation()
 // now optionally receives the set of event ids G's own fold already
 // rejected, and simply defers to that verdict for claim-issue events,
@@ -39,14 +39,18 @@
 // two-phase materializeConservation() for how the two are threaded
 // together.
 //
-// 'pot-release' (added for the jackpot module, the project's first
-// real causal contract beyond a plain transfer) is the one deliberate
+// 'pot-release' (added for pool-reducer.js, a general causal-contract
+// primitive — a real community jackpot is one application of it, not
+// what this mechanism is specifically for) is the one deliberate
 // exception to "transfer requires a signature," and it is safe for a
-// precise reason, not despite missing one: a pot address (e.g.
-// 'jackpot-pot:cycle-3') has no keypair, by design — nobody CAN sign
-// on its behalf, ever, so requiring a signature here would make the
-// pot's contents permanently unspendable rather than protect anything.
-// Authorization instead comes from recomputation: an injected
+// precise reason, not despite missing one: a pool address (e.g.
+// 'jackpot-pot:cycle-3' — the literal address prefix stays as-is for
+// backward compatibility with pools already minted under it, even
+// though the file and functions around it were renamed) has no
+// keypair, by design — nobody CAN sign on its behalf, ever, so
+// requiring a signature here would make the pool's contents
+// permanently unspendable rather than protect anything. Authorization
+// instead comes from recomputation: an injected
 // verifyPotRelease(claimId, from, to, releaseProof, conservationState)
 // function — supplied by the caller, never hardcoded here, matching
 // the exact injected-dependency pattern module-submission.js's
@@ -123,8 +127,8 @@ async function verifyTransferAuthorization(event) {
  * @param {(claimId: string, from: string, to: string, releaseProof: any, conservationState: import('./conservation.js').ConservationState) => (boolean | Promise<boolean>)} [verifyPotRelease]
  *   Optional. Omitted entirely, every 'pot-release' event is rejected
  *   — no deployment accidentally gains a signature-free transfer path
- *   just by existing; a jackpot-style module must explicitly wire this
- *   in (main.js does, via jackpot-reducer.js's verifyJackpotPayout()).
+ *   just by existing; a pool-style contract must explicitly wire this
+ *   in (main.js does, via pool-reducer.js's verifyPoolPayout()).
  * @param {Set<string>} [gRejectedEventIds] — event ids g.js's own fold
  *   rejected (insufficient balance, most commonly). A claim-issue event
  *   in this set is rejected here too, deferring to G's verdict rather
