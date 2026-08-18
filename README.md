@@ -1887,3 +1887,35 @@ previous update to this README.)
   whitepaper §27.9, Appendix H.31. 31 new JS tests, 22 new Rust tests.
   365 JS tests, 185 Rust tests (179 lib + 6 integration), zero warnings
   either language.
+- **Built the Rust mirror of `pool-reducer.js`**, closing the honest
+  gap named at the end of the previous two entries ("this had no Rust
+  mirror at all"). Building it surfaced two real, previously-
+  undiscovered gaps in `conservation_bridge.rs` itself, unrelated to
+  pooling as such but only found because `pool_reducer.rs` needed
+  `'pot-release'` to exist: **the over-issuance cross-check
+  (`gRejectedEventIds`) fixed on the JS side much earlier this session
+  had never been mirrored to Rust at all**, and **neither had
+  `'pot-release'` itself**. `apply_conservation_event`'s real Rust
+  signature took only `(state, event)` — no injected-verifier
+  parameter, no cross-check against G's own rejected-event-id set.
+  Closed directly in `conservation_bridge.rs`, mirroring the JS fixes
+  exactly: two new optional parameters, both `None`-by-default, both
+  confirmed fully backward compatible with a dedicated test. 7 new
+  tests.
+  **`pool_reducer.rs` built from scratch** — 25 tests, one for one with
+  the JS suite, every SECURITY-labeled case covered, all using real
+  Conservation fixtures (real `issue_claim`/`transfer` calls, not
+  hand-built claim objects). `verify_pool_payout` was written directly
+  in its final form — a declarative `Condition` evaluated by
+  `causal_condition_evaluator.rs` — rather than a hand-written version
+  later rewritten, per §27.9's own recommendation.
+  **Cross-language parity measured directly, not assumed**: the
+  identical `(poolId, cycleIndex, contributions)` input run through
+  both languages' `computeWeightedDraw`/`compute_weighted_draw` side by
+  side — `winnerDomain`, `totalAmount`, and the full 64-character
+  SHA-256 `drawHash` matched exactly, on the first attempt. Pinned as a
+  permanent regression test, not left as a one-off terminal comparison.
+  New whitepaper §27.8/§27.9 updates (the previously-honest gaps closed
+  rather than left standing), Appendix H.32. 32 new Rust tests (7 + 25).
+  218 Rust tests total (212 lib + 6 integration), 365 JS tests
+  unchanged, zero warnings either language.
