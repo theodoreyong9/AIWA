@@ -28,6 +28,7 @@
  *   trendingCategories: Array<{ category: string, count: number }>,
  *   categoryGaps: string[],
  *   multiContactOverlap: Array<{ category: string, contactCount: number }>,
+ *   externalTrends: { fetchedAt: number | null, repositories: Array<{ fullName: string, description: string, language: string | null, stars: number, url: string, topics: string[] }> } | null,
  * }} ContextSnapshot
  */
 
@@ -72,9 +73,19 @@
  * @param {string} myDomainId
  * @param {string[]} contactDomainIds
  * @param {{ pinnedModuleIds?: string[], publishedData?: Record<string, Record<string, any>> }} [own]
+ * @param {{ fetchedAt: number | null, repositories: Array<{ fullName: string, description: string, language: string | null, stars: number, url: string, topics: string[] }> } | null} [externalTrends]
+ *   Real, GitHub-sourced software trend data (scripts/fetch-github-
+ *   trends.mjs's own real, scheduled bot output, data/github-trends.json)
+ *   — deliberately kept as its OWN, separately-labeled field, never
+ *   merged into sharedCategories/trendingCategories, because those
+ *   fields specifically mean "real activity on THIS AIWA network" and
+ *   silently blending in software-wide GitHub data would misrepresent
+ *   an external signal as if it were evidence of something happening
+ *   among this domain's own real contacts. null (the default) when no
+ *   external trends file is available at all — never fabricated.
  * @returns {ContextSnapshot}
  */
-export function collectContextSnapshot(registryState, myDomainId, contactDomainIds, own = {}) {
+export function collectContextSnapshot(registryState, myDomainId, contactDomainIds, own = {}, externalTrends = null) {
   const allModules = Object.values(registryState.modules).map((m) => ({ id: m.id, name: m.name, category: m.category, author: m.author, registeredAt: m.registeredAt }));
 
   const myModules = allModules.filter((m) => m.author === myDomainId);
@@ -128,6 +139,7 @@ export function collectContextSnapshot(registryState, myDomainId, contactDomainI
     trendingCategories,
     categoryGaps,
     multiContactOverlap,
+    externalTrends: externalTrends ?? null,
   };
 }
 
@@ -184,15 +196,38 @@ export function buildIdeaSystemPrompt(snapshot) {
     ? multiContactOverlap.slice(0, 5).map(({ category, contactCount }) => `${category} (${contactCount} contacts independently)`).join(', ')
     : 'no category yet shared by 2 or more distinct contacts';
 
+  // Deliberately its own, separately-labeled block — never merged into
+  // the AIWA network lines above. See collectContextSnapshot's own
+  // externalTrends doc comment for why conflating the two would
+  // misrepresent an external signal as evidence of something happening
+  // on this actual network.
+  const externalTrends = snapshot.externalTrends;
+  let externalTrendsLines;
+  if (!externalTrends || !externalTrends.fetchedAt || externalTrends.repositories.length === 0) {
+    externalTrendsLines = ['EXTERNAL SOFTWARE TRENDS: none available right now (the GitHub trends bot has not run yet, or its data could not be reached) — do not invent any.'];
+  } else {
+    const ageMs = Date.now() - externalTrends.fetchedAt;
+    const ageDays = Math.floor(ageMs / (24 * 60 * 60 * 1000));
+    const freshness = ageDays <= 0 ? 'fetched today' : `fetched ${ageDays} day${ageDays === 1 ? '' : 's'} ago — may be stale`;
+    const repoLines = externalTrends.repositories
+      .slice(0, 8)
+      .map((r) => `${r.fullName} (${r.language ?? 'unknown language'}, ${r.stars}★)${r.topics.length > 0 ? ` [${r.topics.slice(0, 3).join(', ')}]` : ''}`)
+      .join('; ');
+    externalTrendsLines = [
+      `EXTERNAL SOFTWARE TRENDS (real, recently-created GitHub repositories network-wide, ${freshness} — NOT this AIWA network, for inspiration only, never evidence of anything happening among this domain's own contacts):`,
+      `- ${repoLines}`,
+    ];
+  }
+
   return [
     'You are a brainstorming assistant inside AIWA, a partition-tolerant platform where domains run small sandboxed modules.',
     'You suggest ONE concrete new module idea per reply, in plain text — short, like a real conversation, not JSON.',
-    'Prefer an idea that ties to this domain\'s ACTUAL USAGE (pinned modules, published data) or a REAL, MULTI-CONTACT pattern over a generic one — a personalized suggestion beats a generic one whenever the data supports it.',
+    'Prefer an idea that ties to this domain\'s ACTUAL USAGE (pinned modules, published data) or a REAL, MULTI-CONTACT pattern over a generic one — a personalized suggestion beats a generic one whenever the data supports it. Treat EXTERNAL SOFTWARE TRENDS only as loose inspiration, never as a claim about this AIWA network.',
     'Format each suggestion as:',
     'Name — one-line tagline',
-    'Why: one short sentence tying it to a real, specific signal below — name the actual signal (a pinned module, a category gap, a multi-contact pattern), not a vague generality.',
+    'Why: one short sentence tying it to a real, specific signal below — name the actual signal (a pinned module, a category gap, a multi-contact pattern, or an external trend), not a vague generality.',
     '',
-    'NETWORK DATA (your only source of truth — do not invent trends or news, you have no internet access):',
+    'NETWORK DATA (your only source of truth for THIS AIWA network — do not invent trends or news, you have no internet access of your own):',
     `- This domain's own registered modules: ${myModuleNames}`,
     `- ${pinnedLine}`,
     `- ${publishedLine}`,
@@ -201,6 +236,8 @@ export function buildIdeaSystemPrompt(snapshot) {
     `- TRENDING categories (among only the most recently registered modules network-wide): ${trendingLine}`,
     `- CATEGORY GAPS (categories this domain's own contacts have, that this domain itself has none of): ${gapsLine}`,
     `- MULTI-CONTACT PATTERNS (categories where 2+ DISTINCT contacts each independently have a module, not just one prolific contact): ${overlapLine}`,
+    '',
+    ...externalTrendsLines,
     '',
     'If the user asks a follow-up (different category, "another one", "more social", etc.), give a NEW idea matching that request — never repeat a previous suggestion.',
     'Stop writing immediately after the Why line. Do not add anything else.',
@@ -216,6 +253,7 @@ const IDEA_LEAK_MARKERS = [
   'NETWORK DATA', 'You are a brainstorming assistant', 'Format each suggestion as',
   'Stop writing immediately', "This domain's own registered modules:", 'Most common module categories',
   'TRENDING categories', 'CATEGORY GAPS', 'MULTI-CONTACT PATTERNS', 'Prefer an idea that ties to',
+  'EXTERNAL SOFTWARE TRENDS',
 ];
 
 /**
