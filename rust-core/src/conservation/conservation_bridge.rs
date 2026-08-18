@@ -1,5 +1,6 @@
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::conservation::{identity_derivation, ConservationState};
 use crate::event::Event;
@@ -26,6 +27,17 @@ struct TransferPayload {
     signature: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct PotReleasePayload {
+    #[serde(rename = "claimId")]
+    claim_id: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    nonce: Option<String>,
+    #[serde(rename = "releaseProof")]
+    release_proof: Option<Value>,
+}
+
 /// Mirror of the { conservation, usedTransferNonces } shape in
 /// conservation-bridge.js.
 #[derive(Debug, Clone, Default)]
@@ -33,6 +45,15 @@ pub struct ConservationBridgeState {
     pub conservation: ConservationState,
     pub used_transfer_nonces: std::collections::HashMap<String, bool>,
 }
+
+/// Injected verifier for 'pot-release' events — mirror of JS's
+/// verifyPotRelease parameter. See conservation-bridge.js's own header
+/// for why this is safe without a signature: a pool address has no
+/// keypair by design, so requiring one would make its contents
+/// permanently unspendable rather than protect anything. Omitted
+/// (None) entirely, every pot-release is rejected — the same safe
+/// default the JS mirror already guarantees.
+pub type PotReleaseVerifier<'a> = dyn Fn(&str, &str, &str, &Value, &ConservationState) -> bool + 'a;
 
 fn canonical_transfer_message(claim_id: &str, from: &str, to: &str, nonce: &str, timestamp: i64) -> String {
     format!(
@@ -75,11 +96,34 @@ fn verify_transfer_authorization(claim_id: &str, from: &str, to: &str, nonce: &s
 }
 
 /// Mirror of applyConservationEvent() in conservation-bridge.js.
-pub fn apply_conservation_event(state: &ConservationBridgeState, event: &Event) -> ConservationBridgeState {
+///
+/// SECURITY: `g_rejected_event_ids`, when supplied, closes a real
+/// vulnerability found by direct inspection while wiring the jackpot/
+/// pool module (JS side, Appendix H.29): a 'claim-issue' event never
+/// checked whether the issuing domain had real, sufficient balance —
+/// g.rs's own reducer correctly rejects an over-issuance, but this
+/// function, folding the identical event independently, created the
+/// claim anyway, since it never consulted G's verdict. A domain that
+/// had accrued nothing could obtain a real, spendable Conservation
+/// claim for any amount. This mirror had never received the JS-side
+/// fix at all until this revision — closed the same way, by deferring
+/// to G's own already-computed rejected-event-id set rather than
+/// duplicating its reward-formula-dependent balance logic here.
+///
+/// `verify_pot_release`: see PotReleaseVerifier's own doc comment.
+pub fn apply_conservation_event(
+    state: &ConservationBridgeState,
+    event: &Event,
+    g_rejected_event_ids: Option<&std::collections::HashSet<String>>,
+    verify_pot_release: Option<&PotReleaseVerifier>,
+) -> ConservationBridgeState {
     let kind = event.payload.get("type").and_then(|v| v.as_str());
     let Some(kind) = kind else { return state.clone() };
 
     if kind == "claim-issue" {
+        if g_rejected_event_ids.is_some_and(|ids| ids.contains(&event.id)) {
+            return state.clone(); // G rejected this — Conservation must agree, not silently diverge
+        }
         let Ok(p) = serde_json::from_value::<ClaimIssuePayload>(event.payload.clone()) else { return state.clone() };
         let (Some(domain), Some(id), Some(amount)) = (p.domain, p.id, p.amount) else { return state.clone() };
         if domain.is_empty() || id.is_empty() || !amount.is_finite() || amount <= 0.0 {
@@ -117,14 +161,43 @@ pub fn apply_conservation_event(state: &ConservationBridgeState, event: &Event) 
         return new_state;
     }
 
+    if kind == "pot-release" {
+        let Ok(p) = serde_json::from_value::<PotReleasePayload>(event.payload.clone()) else { return state.clone() };
+        let (Some(claim_id), Some(from), Some(to), Some(nonce)) = (p.claim_id, p.from, p.to, p.nonce) else { return state.clone() };
+        if claim_id.is_empty() || from.is_empty() || to.is_empty() || nonce.is_empty() {
+            return state.clone();
+        }
+        if state.used_transfer_nonces.contains_key(&nonce) {
+            return state.clone(); // replay — the exact same protection ordinary transfers already get
+        }
+        let Some(verifier) = verify_pot_release else { return state.clone() }; // no verifier wired in — every pot-release rejected, full stop
+        let release_proof = p.release_proof.unwrap_or(Value::Null);
+        if !verifier(&claim_id, &from, &to, &release_proof, &state.conservation) {
+            return state.clone();
+        }
+        let mut new_state = state.clone();
+        if new_state.conservation.transfer(&claim_id, &from, &to, "0", "identity", identity_derivation).is_ok() {
+            new_state.used_transfer_nonces.insert(nonce, true);
+        } else {
+            return state.clone();
+        }
+        return new_state;
+    }
+
     state.clone()
 }
 
 /// registry(H_d) for Conservation — mirror of materializeConservation().
-pub fn materialize_conservation(ordered_events: &[&Event]) -> ConservationBridgeState {
+/// `g_rejected_event_ids` and `verify_pot_release` threaded through
+/// unchanged — see apply_conservation_event's own doc comment.
+pub fn materialize_conservation(
+    ordered_events: &[&Event],
+    g_rejected_event_ids: Option<&std::collections::HashSet<String>>,
+    verify_pot_release: Option<&PotReleaseVerifier>,
+) -> ConservationBridgeState {
     let mut state = ConservationBridgeState::default();
     for event in ordered_events {
-        state = apply_conservation_event(&state, event);
+        state = apply_conservation_event(&state, event, g_rejected_event_ids, verify_pot_release);
     }
     state
 }
@@ -186,7 +259,7 @@ mod tests {
         let events = dag.topo_order();
         let t = theta(&[("alice", None)]);
         let g_state = GState::materialize(&t, &events);
-        let con_state = materialize_conservation(&events);
+        let con_state = materialize_conservation(&events, None, None);
 
         assert_eq!(g_state.balances.get("alice"), Some(&30.0));
         assert_eq!(con_state.conservation.claims["c1"].amount, 20.0);
@@ -213,7 +286,7 @@ mod tests {
         let budgets = [(alice_id.as_str(), None)];
         let t = theta(&budgets);
         let g_state = GState::materialize(&t, &events);
-        let con_state = materialize_conservation(&events);
+        let con_state = materialize_conservation(&events, None, None);
 
         assert_eq!(g_state.balances.get(&alice_id), Some(&30.0));
         let bob_claims: Vec<_> = con_state.conservation.claims.values().filter(|c| c.owner == "bob" && c.status == crate::conservation::ClaimStatus::Active).collect();
@@ -239,7 +312,7 @@ mod tests {
         )
         .unwrap();
 
-        let con_state = materialize_conservation(&dag.topo_order());
+        let con_state = materialize_conservation(&dag.topo_order(), None, None);
         assert_eq!(con_state.conservation.claims["c1"].owner, alice_id);
         assert_eq!(con_state.conservation.claims["c1"].status, crate::conservation::ClaimStatus::Active);
         let attacker_claims: Vec<_> = con_state.conservation.claims.values().filter(|c| c.owner == "attacker-domain").collect();
@@ -260,7 +333,7 @@ mod tests {
         last = dag.add_event(vec![last], payload.clone()).unwrap();
         dag.add_event(vec![last], payload).unwrap(); // exact same signed payload replayed
 
-        let con_state = materialize_conservation(&dag.topo_order());
+        let con_state = materialize_conservation(&dag.topo_order(), None, None);
         let bob_claims: Vec<_> = con_state.conservation.claims.values().filter(|c| c.owner == "bob" && c.status == crate::conservation::ClaimStatus::Active).collect();
         assert_eq!(bob_claims.len(), 1);
     }
@@ -270,7 +343,7 @@ mod tests {
         let mut dag = EventDagCore::new();
         let genesis = dag.add_event(vec![], serde_json::json!({"type": "genesis"})).unwrap();
         dag.add_event(vec![genesis], serde_json::json!({"type": "transfer", "claimId": "c1", "from": "alice", "to": "bob"})).unwrap();
-        let con_state = materialize_conservation(&dag.topo_order());
+        let con_state = materialize_conservation(&dag.topo_order(), None, None);
         assert!(con_state.conservation.claims.is_empty());
     }
 
@@ -279,7 +352,101 @@ mod tests {
         let mut dag = EventDagCore::new();
         let genesis = dag.add_event(vec![], serde_json::json!({"type": "genesis"})).unwrap();
         dag.add_event(vec![genesis], serde_json::json!({"type": "claim-issue", "domain": "", "id": "x", "amount": 10.0})).unwrap();
-        let con_state = materialize_conservation(&dag.topo_order());
+        let con_state = materialize_conservation(&dag.topo_order(), None, None);
         assert!(con_state.conservation.claims.is_empty());
+    }
+
+    // ── SECURITY: over-issuance, found while wiring the pool module —
+    // never mirrored to Rust until this revision (§27.8/H.29's own JS
+    // fix is now also closed here) ──────────────────────────────────
+
+    #[test]
+    fn security_regression_zero_balance_domain_cannot_create_a_real_claim() {
+        let mut dag = EventDagCore::new();
+        let genesis = dag.add_event(vec![], serde_json::json!({"type": "genesis", "domain": "alice"})).unwrap();
+        // alice has never accrued anything, tries to issue a claim of 1000 anyway.
+        let bad_event = dag.add_event(vec![genesis], serde_json::json!({"type": "claim-issue", "domain": "alice", "id": "c1", "amount": 1000.0})).unwrap();
+
+        let events = dag.topo_order();
+        let t = theta(&[]);
+        let g_state = GState::materialize(&t, &events);
+        assert_eq!(g_state.balances.get("alice"), None);
+        assert!(g_state.accrual_rejections.iter().any(|r| r.event_id == bad_event));
+
+        let rejected_ids: std::collections::HashSet<String> = g_state.accrual_rejections.iter().map(|r| r.event_id.clone()).collect();
+        let con_state = materialize_conservation(&events, Some(&rejected_ids), None);
+        assert!(con_state.conservation.claims.get("c1").is_none(), "Conservation must not create a claim G already rejected");
+    }
+
+    #[test]
+    fn a_real_funded_claim_issue_is_unaffected_by_the_cross_check() {
+        let mut dag = EventDagCore::new();
+        let last = build_domain_with_50(&mut dag, "alice");
+        dag.add_event(vec![last], serde_json::json!({"type": "claim-issue", "domain": "alice", "id": "c1", "amount": 20.0})).unwrap();
+
+        let events = dag.topo_order();
+        let t = theta(&[("alice", None)]);
+        let g_state = GState::materialize(&t, &events);
+        let rejected_ids: std::collections::HashSet<String> = g_state.accrual_rejections.iter().map(|r| r.event_id.clone()).collect();
+        let con_state = materialize_conservation(&events, Some(&rejected_ids), None);
+        assert_eq!(con_state.conservation.claims["c1"].amount, 20.0);
+    }
+
+    #[test]
+    fn omitting_g_rejected_event_ids_entirely_reproduces_the_exact_prior_behavior() {
+        let mut dag = EventDagCore::new();
+        let genesis = dag.add_event(vec![], serde_json::json!({"type": "genesis", "domain": "alice"})).unwrap();
+        dag.add_event(vec![genesis], serde_json::json!({"type": "claim-issue", "domain": "alice", "id": "c1", "amount": 1000.0})).unwrap();
+        let con_state = materialize_conservation(&dag.topo_order(), None, None);
+        assert_eq!(con_state.conservation.claims["c1"].amount, 1000.0);
+    }
+
+    // ── 'pot-release': signature-free but recomputation-verified ────
+
+    #[test]
+    fn pot_release_rejected_outright_with_no_verifier_supplied() {
+        let mut dag = EventDagCore::new();
+        let genesis = dag.add_event(vec![], serde_json::json!({"type": "genesis"})).unwrap();
+        let issue_id = dag.add_event(vec![genesis], serde_json::json!({"type": "claim-issue", "domain": "jackpot-pot:my-pot", "id": "c1", "amount": 10.0})).unwrap();
+        dag.add_event(vec![issue_id], serde_json::json!({"type": "pot-release", "claimId": "c1", "from": "jackpot-pot:my-pot", "to": "alice", "nonce": "n1", "releaseProof": {}})).unwrap();
+        let con_state = materialize_conservation(&dag.topo_order(), None, None);
+        assert_eq!(con_state.conservation.claims["c1"].owner, "jackpot-pot:my-pot");
+    }
+
+    #[test]
+    fn pot_release_accepted_when_the_injected_verifier_approves() {
+        let mut dag = EventDagCore::new();
+        let genesis = dag.add_event(vec![], serde_json::json!({"type": "genesis"})).unwrap();
+        let issue_id = dag.add_event(vec![genesis], serde_json::json!({"type": "claim-issue", "domain": "jackpot-pot:my-pot", "id": "c1", "amount": 10.0})).unwrap();
+        dag.add_event(vec![issue_id], serde_json::json!({"type": "pot-release", "claimId": "c1", "from": "jackpot-pot:my-pot", "to": "alice", "nonce": "n1", "releaseProof": {}})).unwrap();
+        let always_approve = |_: &str, _: &str, _: &str, _: &Value, _: &ConservationState| true;
+        let con_state = materialize_conservation(&dag.topo_order(), None, Some(&always_approve));
+        let alice_claims: Vec<_> = con_state.conservation.claims.values().filter(|c| c.owner == "alice" && c.status == crate::conservation::ClaimStatus::Active).collect();
+        assert_eq!(alice_claims.len(), 1);
+        assert_eq!(alice_claims[0].amount, 10.0);
+    }
+
+    #[test]
+    fn pot_release_rejected_when_the_injected_verifier_disapproves() {
+        let mut dag = EventDagCore::new();
+        let genesis = dag.add_event(vec![], serde_json::json!({"type": "genesis"})).unwrap();
+        let issue_id = dag.add_event(vec![genesis], serde_json::json!({"type": "claim-issue", "domain": "jackpot-pot:my-pot", "id": "c1", "amount": 10.0})).unwrap();
+        dag.add_event(vec![issue_id], serde_json::json!({"type": "pot-release", "claimId": "c1", "from": "jackpot-pot:my-pot", "to": "alice", "nonce": "n1", "releaseProof": {}})).unwrap();
+        let always_reject = |_: &str, _: &str, _: &str, _: &Value, _: &ConservationState| false;
+        let con_state = materialize_conservation(&dag.topo_order(), None, Some(&always_reject));
+        assert_eq!(con_state.conservation.claims["c1"].owner, "jackpot-pot:my-pot");
+    }
+
+    #[test]
+    fn pot_release_replaying_the_same_nonce_is_rejected() {
+        let mut dag = EventDagCore::new();
+        let genesis = dag.add_event(vec![], serde_json::json!({"type": "genesis"})).unwrap();
+        let issue_id = dag.add_event(vec![genesis], serde_json::json!({"type": "claim-issue", "domain": "jackpot-pot:my-pot", "id": "c1", "amount": 10.0})).unwrap();
+        let always_approve = |_: &str, _: &str, _: &str, _: &Value, _: &ConservationState| true;
+        let r1 = dag.add_event(vec![issue_id], serde_json::json!({"type": "pot-release", "claimId": "c1", "from": "jackpot-pot:my-pot", "to": "alice", "nonce": "fixed-nonce", "releaseProof": {}})).unwrap();
+        dag.add_event(vec![r1], serde_json::json!({"type": "pot-release", "claimId": "c1", "from": "jackpot-pot:my-pot", "to": "bob", "nonce": "fixed-nonce", "releaseProof": {}})).unwrap();
+        let con_state = materialize_conservation(&dag.topo_order(), None, Some(&always_approve));
+        let bob_claims: Vec<_> = con_state.conservation.claims.values().filter(|c| c.owner == "bob").collect();
+        assert_eq!(bob_claims.len(), 0, "the replayed nonce must not let a second release through");
     }
 }
