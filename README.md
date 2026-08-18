@@ -1842,3 +1842,48 @@ previous update to this README.)
   "dampened, deployment-configured, off by default"), Appendix H.22
   extended with the real re-derivation. 334 JS tests, 163 Rust tests
   (157 lib + 6 integration), zero warnings either language.
+- **Built composable verification primitives (§27.9)**, closing the
+  second half of the scaling problem §27.8 first named: `ctx` primitives
+  already let any module post or read any event type permissionlessly,
+  but composing existing platform-level VERIFICATION LOGIC in a new way
+  still needed a brand-new reducer file per contract.
+  **Two directions weighed, one chosen deliberately**: a metered,
+  sandboxed JS interpreter — real, substantial, closer in scope to a
+  small EVM — named and set aside as the larger alternative if this
+  smaller design proves insufficient. Built instead: six fixed
+  verification primitives (`ownership`, `signature`, `count`,
+  `deterministic-match`, `unique`, `causal-order`), composed as plain
+  declarative data (AND/OR/NOT), evaluated by one generic evaluator
+  that never executes submitted code. Every primitive generalizes a
+  check some already-shipped reducer already performed by hand —
+  extracted, not invented.
+  **Validated against a real contract, not just demonstrated
+  standalone**: rewrote `pool-reducer.js`'s `verifyPoolPayout` to
+  construct a declarative condition and delegate to the shared
+  evaluator instead of hand-writing the security-critical checks
+  inline. The existing `pool-reducer.test.mjs` — 25 tests, left
+  completely unmodified — passed unchanged against the rewritten
+  implementation, confirming a genuine drop-in replacement, not a
+  parallel system. Confirmed further with a real end-to-end run: a
+  real domain accruing balance, minting a pool, transferring a signed
+  claim in, contributing, and releasing payout through the rewritten
+  path, all working identically to before.
+  **A real path-resolution bug caught by the first test run, not left
+  in**: the signature primitive's dynamic import used a relative path
+  one directory off (`../identity/` instead of `./identity/`) — fixed
+  immediately once the tests actually ran against the real file tree.
+  **A defensive choice made from an earlier lesson, not because a
+  break was confirmed**: both the JS signature primitive's crypto
+  imports are dynamic (loaded inside the function that needs them),
+  specifically so this file never risks reproducing the exact CI break
+  Appendix H.30 already recorded for `cadence-vdf.js`, even though this
+  file isn't currently reachable from any no-npm-install CI job.
+  **Honest, stated gap**: `pool-reducer.js` has no Rust mirror at all —
+  jackpot/pool was only ever built in JS. The Rust evaluator
+  (`causal_condition_evaluator.rs`) is real and independently tested
+  against its own six-primitive contract (22 tests, all passing on the
+  first run), but the "replace a real contract's logic" validation is
+  JS-only until a Rust pool mirror exists to validate against. New
+  whitepaper §27.9, Appendix H.31. 31 new JS tests, 22 new Rust tests.
+  365 JS tests, 185 Rust tests (179 lib + 6 integration), zero warnings
+  either language.
