@@ -1794,3 +1794,51 @@ previous update to this README.)
   `node_modules` entirely absent, matching the real CI job's own
   environment exactly. 319 JS / 152 Rust tests, unchanged, all still
   green.
+- **Built and tested identity-churn resistance (§24.6)**, closing the
+  Result 2 gap the Sybil re-derivation found earlier this session (a
+  domain could abandon an aging identity for a fresh one to dodge the
+  reward formula's own age-decay term). Formalized before any code was
+  written, per explicit request, then implemented: the identity-cost
+  burn required for a NEW registration is now a deployment-chosen,
+  monotonically non-decreasing function of the real Solana slot the
+  burn lands at, measured against a single fixed genesis-slot constant
+  — needing no live "current time" oracle, ever, since the delta
+  between two already-known numbers is computable purely locally.
+  **The real slot was already there, just discarded**: `solana-rpc.js`'s
+  `getTransaction` response already includes it, alongside the fields
+  the reference implementation already reads — closed by reading one
+  more already-present field, not by adding a new RPC call.
+  **Inherits, not worsens, an existing trust boundary**: the same
+  signature already required for burn verification is already
+  sufficient for anyone to independently re-derive and cross-check the
+  claimed slot later, via the same RPC method, at any future point —
+  the exact trust model §24.6(v)/Appendix H.19 already documents for
+  burn verification generally, extended one field further.
+  **Re-derived, not merely asserted**: extended the existing Result 2
+  regression test with the real cost curve — confirmed the original
+  finding (churn beats staying) still holds near genesis, unchanged,
+  then confirmed a genuine crossover exists within a handful of
+  simulated rounds, with cumulative churn profit falling decisively
+  behind cumulative stay-old profit as real deployment time passes.
+  **Two honest limits named, not glossed over**: this doesn't touch the
+  reward formula's own age term at all — `module-rank.js`'s
+  `rankFromIdentityAndCadence` already reads the same identity-cost
+  state, confirmed by direct inspection, so it inherits the same
+  benefit automatically, no separate fix needed; and the mechanism does
+  not distinguish a churning attacker from a legitimate late joiner
+  years into a mature deployment — both pay the same escalated cost, an
+  unresolved policy tradeoff this reference implementation states
+  rather than decides, defaulting the whole mechanism OFF unless a
+  deployment explicitly configures a genesis slot and cost curve.
+  Wired into a new Parameters-screen control in `main.js`, off by
+  default. Both languages: 12 new JS tests (`identity-cost.js`), 7 new
+  JS tests threading it through the real DAG fold
+  (`identity-cost-reducer.js`), 1 new re-derivation test
+  (`sybil-reward-splitting.test.mjs`), and 11 new Rust tests mirroring
+  the JS suite exactly (`identity/mod.rs`), plus Rust's own
+  `identity_cost_reducer.rs` updated to thread the new config through
+  its real DAG fold. New whitepaper §24.6 extension, §17 matrix update
+  (identity-churn moved from "confirmed to exist, not yet bounded" to
+  "dampened, deployment-configured, off by default"), Appendix H.22
+  extended with the real re-derivation. 334 JS tests, 163 Rust tests
+  (157 lib + 6 integration), zero warnings either language.
