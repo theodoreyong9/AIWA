@@ -382,6 +382,25 @@ let cadenceVdfIterations = 200000;
 // deployment that wants it configures genesisSlot + lamportsPerSlot in
 // Parameters.
 let identityChurnConfig = null;
+// §28's deepened idea agent: real, GitHub-sourced trend data
+// (scripts/fetch-github-trends.mjs's bot output, committed to
+// data/github-trends.json). Fetched once, lazily, cached here — never
+// awaited inside a render function, matching this project's own
+// "delayed, never blocked" discipline (§7): the idea agent works
+// identically whether this fetch has resolved yet, failed, or never
+// runs at all (a partition, an offline build, a fresh clone before the
+// bot's first scheduled run) — it just falls back to null, exactly
+// like collectContextSnapshot's own documented default.
+let cachedExternalTrends = null;
+let externalTrendsFetchStarted = false;
+function loadExternalTrendsOnce() {
+  if (externalTrendsFetchStarted) return;
+  externalTrendsFetchStarted = true;
+  fetch('./data/github-trends.json')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => { cachedExternalTrends = data; })
+    .catch(() => { /* offline, partitioned, or file genuinely absent — cachedExternalTrends simply stays null, never blocks anything */ });
+}
 let myDomain = null; // the one real domain this app instance represents — null until a wallet exists
 let testPeers = new Map(); // id -> DomainReplica, testing-only, never the primary UI concept
 let submissionState = initialSubmissionState();
@@ -878,9 +897,10 @@ function renderDomainScreen() {
   const registry = myDomain.materializeModules();
   const localIdentityState = myDomain.materializeIdentity();
 
+  loadExternalTrendsOnce();
   const myPinnedModuleIds = pinnedIds(myDomain.id);
   const myPublishedData = publishedDataForDomain(myDomain.materializePublicProfiles(), myDomain.id);
-  const ideaSnapshot = collectContextSnapshot(registry, myDomain.id, realContactIds(), { pinnedModuleIds: myPinnedModuleIds, publishedData: myPublishedData });
+  const ideaSnapshot = collectContextSnapshot(registry, myDomain.id, realContactIds(), { pinnedModuleIds: myPinnedModuleIds, publishedData: myPublishedData }, cachedExternalTrends);
   const contactCount = Object.keys(ideaSnapshot.contactModules).length;
   document.getElementById('idea-network-info').textContent =
     `Sees: ${ideaSnapshot.myModules.length} of your modules, ${contactCount} contact${contactCount === 1 ? '' : 's'} with registered modules.`;
@@ -1157,10 +1177,11 @@ async function requestModuleIdea() {
     }
 
     const registry = myDomain.materializeModules();
+    loadExternalTrendsOnce();
     const snapshot = collectContextSnapshot(registry, myDomain.id, realContactIds(), {
       pinnedModuleIds: pinnedIds(myDomain.id),
       publishedData: publishedDataForDomain(myDomain.materializePublicProfiles(), myDomain.id),
-    });
+    }, cachedExternalTrends);
     const systemPrompt = buildIdeaSystemPrompt(snapshot);
 
     msgEl.textContent = 'Loading on-device model — first run downloads it, later runs reuse it…';
