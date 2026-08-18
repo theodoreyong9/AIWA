@@ -29,6 +29,7 @@
  *   categoryGaps: string[],
  *   multiContactOverlap: Array<{ category: string, contactCount: number }>,
  *   externalTrends: { fetchedAt: number | null, repositories: Array<{ fullName: string, description: string, language: string | null, stars: number, url: string, topics: string[] }> } | null,
+ *   mechanismPatterns: { totalModulesMined: number, commonCtxPatterns: Array<{ call: string, freq: number, count: number }>, unusedCtxPrimitives: string[] } | null,
  * }} ContextSnapshot
  */
 
@@ -83,9 +84,21 @@
  *   an external signal as if it were evidence of something happening
  *   among this domain's own real contacts. null (the default) when no
  *   external trends file is available at all — never fabricated.
+ * @param {{ totalModulesMined: number, commonCtxPatterns: Array<{ call: string, freq: number, count: number }>, unusedCtxPrimitives: string[] } | null} [mechanismPatterns]
+ *   Real, code-derived signal (module-pattern-miner.js's own
+ *   summarizeModulePatterns() output, computed over already-fetched,
+ *   already-hash-verified real module source — see module-loader.js's
+ *   loadVerifiedModuleCode()) — which real ctx primitives already-
+ *   registered modules actually reach for, and which are never used at
+ *   all. A YourMine-inspired signal (the user's own mine-patterns.js /
+ *   ym-spec.json), adapted: stops at frequency data, deliberately never
+ *   code skeletons or templates — see module-pattern-miner.js's own
+ *   header for why code generation stays outside this project's
+ *   confirmed AI scope. null (the default) when nothing has been mined
+ *   yet — never fabricated.
  * @returns {ContextSnapshot}
  */
-export function collectContextSnapshot(registryState, myDomainId, contactDomainIds, own = {}, externalTrends = null) {
+export function collectContextSnapshot(registryState, myDomainId, contactDomainIds, own = {}, externalTrends = null, mechanismPatterns = null) {
   const allModules = Object.values(registryState.modules).map((m) => ({ id: m.id, name: m.name, category: m.category, author: m.author, registeredAt: m.registeredAt }));
 
   const myModules = allModules.filter((m) => m.author === myDomainId);
@@ -140,6 +153,7 @@ export function collectContextSnapshot(registryState, myDomainId, contactDomainI
     categoryGaps,
     multiContactOverlap,
     externalTrends: externalTrends ?? null,
+    mechanismPatterns: mechanismPatterns ?? null,
   };
 }
 
@@ -219,13 +233,37 @@ export function buildIdeaSystemPrompt(snapshot) {
     ];
   }
 
+  // Deliberately its own, separately-labeled block, same discipline as
+  // externalTrendsLines above — real, code-derived data (real ctx
+  // primitive usage across already-hash-verified module source, see
+  // module-pattern-miner.js's own header), never a code template or
+  // skeleton: this project's confirmed AI scope stops at text
+  // inspiration, not code generation.
+  const mechanismPatterns = snapshot.mechanismPatterns;
+  let mechanismPatternLines;
+  if (!mechanismPatterns || mechanismPatterns.totalModulesMined === 0) {
+    mechanismPatternLines = ['MECHANISM PATTERNS: none mined yet (no real module source has been fetched and hash-verified for this) — do not invent any.'];
+  } else {
+    const commonLine = mechanismPatterns.commonCtxPatterns.length > 0
+      ? mechanismPatterns.commonCtxPatterns.map((p) => `ctx.${p.call} (${Math.round(p.freq * 100)}%)`).join(', ')
+      : 'no ctx primitive common enough across mined modules to report';
+    const unusedLine = mechanismPatterns.unusedCtxPrimitives.length > 0
+      ? mechanismPatterns.unusedCtxPrimitives.map((c) => `ctx.${c}`).join(', ')
+      : 'every real ctx primitive is used by at least one mined module';
+    mechanismPatternLines = [
+      `MECHANISM PATTERNS (real ctx primitive usage across ${mechanismPatterns.totalModulesMined} already-registered, hash-verified real module(s) — a code-derived signal, not a claim about categories or people):`,
+      `- Common: ${commonLine}`,
+      `- NEVER YET USED by any mined module (a real, concrete gap — a genuinely new mechanism, not just a new category): ${unusedLine}`,
+    ];
+  }
+
   return [
     'You are a brainstorming assistant inside AIWA, a partition-tolerant platform where domains run small sandboxed modules.',
     'You suggest ONE concrete new module idea per reply, in plain text — short, like a real conversation, not JSON.',
-    'Prefer an idea that ties to this domain\'s ACTUAL USAGE (pinned modules, published data) or a REAL, MULTI-CONTACT pattern over a generic one — a personalized suggestion beats a generic one whenever the data supports it. Treat EXTERNAL SOFTWARE TRENDS only as loose inspiration, never as a claim about this AIWA network.',
+    'Prefer an idea that ties to this domain\'s ACTUAL USAGE (pinned modules, published data) or a REAL, MULTI-CONTACT pattern over a generic one — a personalized suggestion beats a generic one whenever the data supports it. Treat EXTERNAL SOFTWARE TRENDS only as loose inspiration, never as a claim about this AIWA network. A NEVER YET USED mechanism from MECHANISM PATTERNS is a strong, specific hook when available.',
     'Format each suggestion as:',
     'Name — one-line tagline',
-    'Why: one short sentence tying it to a real, specific signal below — name the actual signal (a pinned module, a category gap, a multi-contact pattern, or an external trend), not a vague generality.',
+    'Why: one short sentence tying it to a real, specific signal below — name the actual signal (a pinned module, a category gap, a multi-contact pattern, an external trend, or an unused mechanism), not a vague generality.',
     '',
     'NETWORK DATA (your only source of truth for THIS AIWA network — do not invent trends or news, you have no internet access of your own):',
     `- This domain's own registered modules: ${myModuleNames}`,
@@ -238,6 +276,8 @@ export function buildIdeaSystemPrompt(snapshot) {
     `- MULTI-CONTACT PATTERNS (categories where 2+ DISTINCT contacts each independently have a module, not just one prolific contact): ${overlapLine}`,
     '',
     ...externalTrendsLines,
+    '',
+    ...mechanismPatternLines,
     '',
     'If the user asks a follow-up (different category, "another one", "more social", etc.), give a NEW idea matching that request — never repeat a previous suggestion.',
     'Stop writing immediately after the Why line. Do not add anything else.',
@@ -253,7 +293,7 @@ const IDEA_LEAK_MARKERS = [
   'NETWORK DATA', 'You are a brainstorming assistant', 'Format each suggestion as',
   'Stop writing immediately', "This domain's own registered modules:", 'Most common module categories',
   'TRENDING categories', 'CATEGORY GAPS', 'MULTI-CONTACT PATTERNS', 'Prefer an idea that ties to',
-  'EXTERNAL SOFTWARE TRENDS',
+  'EXTERNAL SOFTWARE TRENDS', 'MECHANISM PATTERNS',
 ];
 
 /**
