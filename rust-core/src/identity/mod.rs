@@ -18,12 +18,19 @@ pub enum Commitment {
 /// reference implementation's browser-facing solana-rpc.js is the only
 /// place that touches the network; this struct is what it's expected to
 /// produce).
+///
+/// `slot`: §24 churn resistance — the real Solana slot the burn landed
+/// at, already present in every burn-verification RPC response
+/// (previously read and discarded on the JS side too — see
+/// solana-rpc.js's own header for the full account). `None` when
+/// unknown, never treated as advantageous — see required_burn_lamports.
 #[derive(Debug, Clone)]
 pub struct NormalizedBurnTx {
     pub signature: String,
     pub err: Option<String>,
     pub incinerator_balance_delta_lamports: i64,
     pub commitment: Commitment,
+    pub slot: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +39,40 @@ pub struct RegisteredIdentity {
     pub signature: String,
     pub burned_lamports: i64,
     pub registered_at: i64,
+    pub slot: Option<i64>,
+}
+
+/// §24 churn resistance — deployment-wide, real-slot-indexed identity
+/// cost. Mirror of identity-cost.js's own mechanism; see that file's
+/// header for the full rationale (why this closes the Sybil re-
+/// derivation's Result 2 without touching the reward formula's own
+/// domain-local age term, why it needs no live "current time" oracle,
+/// and the honest, unresolved late-joiner tradeoff it does not
+/// prescribe an answer to). `genesis_slot` is a single fixed deployment
+/// constant, agreed once, exactly like alpha/beta/gamma/C/min_q already
+/// are.
+pub struct ChurnConfig<'a> {
+    pub genesis_slot: i64,
+    pub cost_curve: &'a dyn Fn(i64) -> i64,
+}
+
+/// A deployment-chosen cost curve: real burn lamports required as a
+/// function of real slots elapsed since genesis. Linear is the
+/// simplest honest choice, not the only one this mechanism requires.
+pub fn linear_cost_curve(base_lamports: i64, lamports_per_slot: i64) -> impl Fn(i64) -> i64 {
+    move |slots_since_genesis: i64| base_lamports + slots_since_genesis.max(0) * lamports_per_slot
+}
+
+/// The minimum burn required for a registration landing at
+/// `registration_slot`. Pure, purely local — no network access needed,
+/// only the two already-known numbers. Returns 0 for an unknown slot —
+/// an absent field is never treated as advantageous, but also never
+/// penalized beyond whatever floor the caller separately requires.
+pub fn required_burn_lamports(registration_slot: Option<i64>, genesis_slot: i64, cost_curve: &dyn Fn(i64) -> i64) -> i64 {
+    match registration_slot {
+        None => 0,
+        Some(slot) => cost_curve((slot - genesis_slot).max(0)),
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -89,12 +130,19 @@ impl IdentityCostState {
 
     /// Mirror of registerIdentityCost() in identity-cost.js. Enforces
     /// the same replay guard: one signature backs exactly one identity.
+    /// `churn_config`: §24 — when supplied, the effective floor is
+    /// whichever is HIGHER of `min_lamports` and the real, slot-indexed
+    /// requirement, so an explicit deployment policy floor and the
+    /// churn-resistance curve compose rather than one silently
+    /// overriding the other. `None` reproduces the exact prior
+    /// behavior — no curve enforced.
     pub fn register_identity_cost(
         &mut self,
         domain: &str,
         tx: &NormalizedBurnTx,
         min_lamports: i64,
         now: i64,
+        churn_config: Option<&ChurnConfig>,
     ) -> RegisterResult {
         if self.used_signatures.contains_key(&tx.signature) {
             return RegisterResult {
@@ -109,7 +157,12 @@ impl IdentityCostState {
             };
         }
 
-        let check = verify_burn_proof(tx, min_lamports);
+        let effective_min_lamports = match churn_config {
+            Some(cfg) => min_lamports.max(required_burn_lamports(tx.slot, cfg.genesis_slot, cfg.cost_curve)),
+            None => min_lamports,
+        };
+
+        let check = verify_burn_proof(tx, effective_min_lamports);
         if !check.valid {
             return RegisterResult { accepted: false, reason: check.reason };
         }
@@ -121,6 +174,7 @@ impl IdentityCostState {
                 signature: tx.signature.clone(),
                 burned_lamports: tx.incinerator_balance_delta_lamports,
                 registered_at: now,
+                slot: tx.slot,
             },
         );
         self.used_signatures.insert(tx.signature.clone(), true);
@@ -144,7 +198,7 @@ mod tests {
     const ONE_SOL_LAMPORTS: i64 = 1_000_000_000;
 
     fn valid_tx(signature: &str, delta: i64, commitment: Commitment, err: Option<String>) -> NormalizedBurnTx {
-        NormalizedBurnTx { signature: signature.to_string(), err, incinerator_balance_delta_lamports: delta, commitment }
+        NormalizedBurnTx { signature: signature.to_string(), err, incinerator_balance_delta_lamports: delta, commitment, slot: None }
     }
 
     #[test]
@@ -187,7 +241,7 @@ mod tests {
     fn register_accepts_a_valid_burn_and_records_it() {
         let mut state = IdentityCostState::new();
         let tx = valid_tx("sig-1", ONE_SOL_LAMPORTS, Commitment::Finalized, None);
-        let result = state.register_identity_cost("earth", &tx, ONE_SOL_LAMPORTS, 1000);
+        let result = state.register_identity_cost("earth", &tx, ONE_SOL_LAMPORTS, 1000, None);
 
         assert!(result.accepted);
         assert!(state.has_identity_cost("earth"));
@@ -198,9 +252,9 @@ mod tests {
     fn same_signature_cannot_back_two_domains() {
         let mut state = IdentityCostState::new();
         let tx = valid_tx("sig-1", ONE_SOL_LAMPORTS, Commitment::Finalized, None);
-        state.register_identity_cost("earth", &tx, ONE_SOL_LAMPORTS, 1000);
+        state.register_identity_cost("earth", &tx, ONE_SOL_LAMPORTS, 1000, None);
 
-        let second = state.register_identity_cost("mars", &tx, ONE_SOL_LAMPORTS, 1001);
+        let second = state.register_identity_cost("mars", &tx, ONE_SOL_LAMPORTS, 1001, None);
         assert!(!second.accepted);
         assert!(!state.has_identity_cost("mars"));
     }
@@ -209,10 +263,10 @@ mod tests {
     fn domain_cannot_register_twice() {
         let mut state = IdentityCostState::new();
         let tx1 = valid_tx("sig-1", ONE_SOL_LAMPORTS, Commitment::Finalized, None);
-        state.register_identity_cost("earth", &tx1, ONE_SOL_LAMPORTS, 1000);
+        state.register_identity_cost("earth", &tx1, ONE_SOL_LAMPORTS, 1000, None);
 
         let tx2 = valid_tx("sig-2", ONE_SOL_LAMPORTS, Commitment::Finalized, None);
-        let second = state.register_identity_cost("earth", &tx2, ONE_SOL_LAMPORTS, 1001);
+        let second = state.register_identity_cost("earth", &tx2, ONE_SOL_LAMPORTS, 1001, None);
         assert!(!second.accepted);
     }
 
@@ -220,7 +274,7 @@ mod tests {
     fn invalid_burn_rejected_at_registration_too() {
         let mut state = IdentityCostState::new();
         let tx = valid_tx("sig-1", 1, Commitment::Finalized, None);
-        let result = state.register_identity_cost("earth", &tx, ONE_SOL_LAMPORTS, 1000);
+        let result = state.register_identity_cost("earth", &tx, ONE_SOL_LAMPORTS, 1000, None);
         assert!(!result.accepted);
         assert!(!state.has_identity_cost("earth"));
     }
@@ -229,5 +283,105 @@ mod tests {
     fn has_identity_cost_false_for_unregistered_domain() {
         let state = IdentityCostState::new();
         assert!(!state.has_identity_cost("mars"));
+    }
+
+    // ── Churn resistance: deployment-wide, real-slot-indexed identity
+    // cost (§24) — mirror of identity-cost.test.mjs's own suite ──────
+
+    #[test]
+    fn linear_cost_curve_is_pure_and_deterministic() {
+        let curve = linear_cost_curve(1000, 10);
+        assert_eq!(curve(0), 1000);
+        assert_eq!(curve(50), 1500);
+        assert_eq!(curve(100), 2000);
+    }
+
+    #[test]
+    fn required_burn_lamports_computes_purely_locally() {
+        let curve = linear_cost_curve(1000, 10);
+        assert_eq!(required_burn_lamports(Some(1050), 1000, &curve), 1500);
+        assert_eq!(required_burn_lamports(Some(1000), 1000, &curve), 1000);
+    }
+
+    #[test]
+    fn required_burn_lamports_clamps_pre_genesis_slots_rather_than_going_negative() {
+        let curve = linear_cost_curve(1000, 10);
+        assert_eq!(required_burn_lamports(Some(900), 1000, &curve), 1000);
+    }
+
+    #[test]
+    fn required_burn_lamports_is_zero_for_an_unknown_slot() {
+        let curve = linear_cost_curve(1000, 10);
+        assert_eq!(required_burn_lamports(None, 1000, &curve), 0);
+    }
+
+    #[test]
+    fn register_identity_cost_enforces_the_curve_when_churn_config_is_supplied() {
+        let curve = linear_cost_curve(ONE_SOL_LAMPORTS, 1_000_000);
+        let churn_config = ChurnConfig { genesis_slot: 1000, cost_curve: &curve };
+        let mut state = IdentityCostState::new();
+        let mut tx = valid_tx("sig-1", ONE_SOL_LAMPORTS, Commitment::Finalized, None);
+        tx.slot = Some(1500); // 500 slots since genesis needs 1 SOL + 500M lamports; this burn is only 1 SOL
+        let result = state.register_identity_cost("earth", &tx, 0, 1000, Some(&churn_config));
+        assert!(!result.accepted, "a burn below the real slot-indexed requirement must be rejected");
+    }
+
+    #[test]
+    fn register_identity_cost_accepts_a_burn_meeting_the_curve() {
+        let curve = linear_cost_curve(ONE_SOL_LAMPORTS, 1_000_000);
+        let churn_config = ChurnConfig { genesis_slot: 1000, cost_curve: &curve };
+        let mut state = IdentityCostState::new();
+        let mut tx = valid_tx("sig-1", ONE_SOL_LAMPORTS, Commitment::Finalized, None);
+        tx.slot = Some(1000); // at genesis, base cost only
+        let result = state.register_identity_cost("earth", &tx, 0, 1000, Some(&churn_config));
+        assert!(result.accepted);
+        assert_eq!(state.registered["earth"].slot, Some(1000));
+    }
+
+    #[test]
+    fn a_churn_attempt_later_in_real_time_costs_objectively_more() {
+        let curve = linear_cost_curve(ONE_SOL_LAMPORTS, 1_000_000);
+        let genesis_slot = 1000;
+        let first_required = required_burn_lamports(Some(1100), genesis_slot, &curve);
+        let second_required = required_burn_lamports(Some(50100), genesis_slot, &curve);
+        assert!(second_required > first_required, "real elapsed deployment-wide time must make a later registration cost more, regardless of which domain id is used");
+    }
+
+    #[test]
+    fn omitting_churn_config_entirely_reproduces_the_exact_prior_behavior() {
+        let mut state = IdentityCostState::new();
+        let mut tx = valid_tx("sig-1", ONE_SOL_LAMPORTS, Commitment::Finalized, None);
+        tx.slot = Some(999_999_999);
+        let result = state.register_identity_cost("earth", &tx, 0, 1000, None);
+        assert!(result.accepted, "omitting churn_config must reproduce the exact prior behavior — no curve enforced");
+    }
+
+    #[test]
+    fn registered_state_carries_the_real_slot() {
+        let mut state = IdentityCostState::new();
+        let mut tx = valid_tx("sig-1", ONE_SOL_LAMPORTS, Commitment::Finalized, None);
+        tx.slot = Some(12345);
+        state.register_identity_cost("earth", &tx, 0, 1000, None);
+        assert_eq!(state.registered["earth"].slot, Some(12345));
+    }
+
+    #[test]
+    fn a_tx_with_no_slot_registers_with_none_not_a_panic() {
+        let mut state = IdentityCostState::new();
+        let tx = valid_tx("sig-1", ONE_SOL_LAMPORTS, Commitment::Finalized, None); // slot defaults to None
+        let result = state.register_identity_cost("earth", &tx, 0, 1000, None);
+        assert!(result.accepted);
+        assert_eq!(state.registered["earth"].slot, None);
+    }
+
+    #[test]
+    fn explicit_min_lamports_and_churn_config_compose_the_higher_applies() {
+        let curve = linear_cost_curve(100, 1); // curve requires very little here
+        let churn_config = ChurnConfig { genesis_slot: 1000, cost_curve: &curve };
+        let mut state = IdentityCostState::new();
+        let mut tx = valid_tx("sig-1", 500, Commitment::Finalized, None);
+        tx.slot = Some(1000);
+        let result = state.register_identity_cost("earth", &tx, 10_000, 1000, Some(&churn_config));
+        assert!(!result.accepted, "the explicit min_lamports floor (10,000) must still apply even though the curve alone would have accepted 500");
     }
 }
