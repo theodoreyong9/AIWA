@@ -2046,3 +2046,42 @@ previous update to this README.)
   data results in. New whitepaper §28 update, Appendix H.35. 9 new
   tests (19 total in `idea-agent.test.mjs`, up from 10). 387 JS tests
   overall, zero warnings.
+- **Built a real GitHub bot feeding the idea agent (§28)** — the user
+  initially asked for "a LinkedIn bot," named directly as a real legal
+  exposure (LinkedIn's ToS generally prohibits automated scraping)
+  before any code was written; corrected by the user to GitHub, which
+  resolved cleanly: GitHub's own official, documented, public search
+  API (`GET /search/repositories`) is legal, ToS-compliant, and well
+  within its own rate limit for a once-daily run.
+  **`scripts/fetch-github-trends.mjs`**, split the same way
+  `solana-rpc.js`/`webllm-engine.js` already are: pure, fully-tested
+  query-building and response-shaping (6 tests, against a fixture
+  matching GitHub's own real documented response shape); the real
+  network call itself is untestable in this sandbox, same as those
+  other two files, for the same reason.
+  **`update-github-trends.yml`**, the actual bot: a scheduled Action
+  (daily), mirroring `ci.yml`'s own `wasm-build` job's exact commit-
+  back pattern. The committed placeholder file starts honestly empty
+  (`fetchedAt: null`) rather than fabricated — the same "never invent a
+  trend" rule already applied to the model's own prompt, applied here
+  to the file that feeds it.
+  **A real deployment bug caught before shipping, not after**: the
+  data file was first written to a repo-root `data/` directory —
+  reading `deploy-pages.yml`'s real config directly showed it only
+  serves `public/`, so that path would have silently, permanently
+  failed on the deployed site. Corrected to `public/data/` before
+  delivery.
+  **Wired to never block**: the app fetches this static, same-origin
+  file once, lazily, cached — never awaited inside a render function,
+  so the idea agent's own responsiveness never depends on this
+  resolving, matching §7's "delayed, never blocked" discipline exactly.
+  **Kept strictly separate from AIWA's own real network data**: the
+  external signal lives in its own, clearly-labeled prompt section
+  ("NOT this AIWA network, for inspiration only"), confirmed by a
+  dedicated test to never leak into the fields that specifically mean
+  real activity among this domain's own contacts. Freshness is stated
+  honestly in the prompt (today vs. N days ago — may be stale).
+  `ci.yml`'s `paths-ignore` extended to exclude this bot's own daily
+  commit, same reasoning already applied to the WASM-rebuild bot.
+  New whitepaper §28 update, Appendix H.36. 12 new tests (6 +
+  6). 399 JS tests total, zero warnings.
