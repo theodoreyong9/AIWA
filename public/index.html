@@ -172,6 +172,20 @@
       </div>
 
       <div class="card">
+        <h2>Identity churn resistance (§24) — off by default</h2>
+        <p class="hint">Ties the real burn required for a NEW identity to real, deployment-wide elapsed time (Solana slots since this deployment's own genesis) rather than any per-domain counter — closes the identity-churn incentive the Sybil re-derivation found (Result 2), without touching the reward formula's own domain-local age term at all. A genuine, unresolved policy tradeoff: a legitimate late joiner pays the same escalated cost a churn attempt would. Off unless explicitly configured.</p>
+        <label class="field-label">Enabled</label>
+        <select id="churn-config-enabled">
+          <option value="off" selected>Off (default)</option>
+          <option value="on">On</option>
+        </select>
+        <label class="field-label">Genesis slot</label>
+        <input type="number" id="churn-genesis-slot" min="0" step="1" value="0" />
+        <label class="field-label">Lamports per slot elapsed</label>
+        <input type="number" id="churn-lamports-per-slot" min="0" step="1" value="1000" />
+      </div>
+
+      <div class="card">
         <h2>Reward formula (θ) — immutable once minted</h2>
         <p class="hint">r(b,q,q<sub>total</sub>,T) = (b · q<sup>α</sup>) / [ln(q<sub>total</sub><sup>β(1−T)</sup> + C)]<sup>γ</sup> — no longer a free-editable field. A formula id is permanent from the moment it's minted; only which one THIS domain currently uses can change.</p>
         <label class="field-label">Using formula</label>
