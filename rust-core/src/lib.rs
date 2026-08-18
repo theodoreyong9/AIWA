@@ -4,6 +4,7 @@ mod core;
 mod dag;
 mod economics;
 mod event;
+mod generic_contract_reducer;
 mod identity;
 mod modules;
 mod pool_reducer;
@@ -24,6 +25,7 @@ pub use economics::{
 pub use event::Event;
 pub use causal_condition_evaluator::{evaluate_condition, Condition, EvaluationContext, FunctionRegistry};
 pub use pool_reducer::{compute_weighted_draw, pot_address, verify_pool_payout, Contribution, Cycle, Draw, PoolConfig, PoolRejection, PoolState};
+pub use generic_contract_reducer::{substitute_placeholders, verify_generic_release, GenericContract, GenericContractRejection, GenericContractState};
 pub use public_profile_reducer::{published_data_for_domain, PublicProfileState, PublishedValue};
 pub use identity::{
     apply_identity_event, derive_domain_id, materialize_identity, short_domain_label,
