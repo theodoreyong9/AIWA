@@ -23,6 +23,7 @@ pub use identity::{
     apply_identity_event, derive_domain_id, materialize_identity, short_domain_label,
     verify_burn_proof, Commitment, IdentityCostState, NormalizedBurnTx, RegisterResult,
     RegisteredIdentity, VerifyResult, SOLANA_INCINERATOR_ADDRESS,
+    ChurnConfig, linear_cost_curve, required_burn_lamports,
 };
 pub use modules::{
     apply_module_event, build_submission_event, check_submission_eligibility,
