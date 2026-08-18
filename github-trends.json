@@ -1,0 +1,5 @@
+{
+  "fetchedAt": null,
+  "repositories": [],
+  "note": "This file is written by the real, scheduled GitHub bot (.github/workflows/update-github-trends.yml, running scripts/fetch-github-trends.mjs) against GitHub's own real, public search API. It is deliberately committed empty here rather than seeded with fabricated example data — this project's own discipline (never invent trends, never fabricate a network signal) applies to this file exactly as it applies to idea-agent.js's own prompt-building rules. It will be overwritten with real data on the bot's first real scheduled run after this file is merged."
+}
