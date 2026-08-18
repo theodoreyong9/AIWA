@@ -1957,3 +1957,14 @@ previous update to this README.)
   parity as its own named risk category), Appendix H.33. 12 new Rust
   tests (2 + 10). 230 Rust tests total (224 lib + 6 integration), 365
   JS tests unchanged, zero warnings either language.
+- **Found and fixed a real stale-doc inconsistency, in the course of
+  answering a direct "list the open problems" question**: §17's own
+  table had two rows ("Wall-clock manipulation cannot directly change
+  reward", "Cadence cannot be accelerated arbitrarily") still reading
+  "unverified dependency" / "not established", directly contradicting
+  R11's own closure (§16.2, Appendix H.30) recorded a few rows above in
+  the SAME table, from earlier this session. §29.8 had the identical
+  problem. All three corrected to reflect R11's real, tested closure
+  and its own honest, stated limits — found by verifying the table
+  against itself rather than reciting it from memory, the exact
+  discipline this project keeps asking of itself.
