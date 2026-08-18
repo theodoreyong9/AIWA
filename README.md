@@ -1,3 +1,6 @@
+This project is the Safe version of the YourMine project
+https://github.com/theodoreyong9/YourMinedApp
+
 # AIWA — Autonomous Interplanetary Web Application
 
 Reference implementation of the architecture described in the AIWA
