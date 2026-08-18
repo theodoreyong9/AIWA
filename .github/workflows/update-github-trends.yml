@@ -1,0 +1,52 @@
+name: Update GitHub trends (idea-agent bot)
+
+# The real "GitHub bot" §28's deepened idea agent reads from — see
+# scripts/fetch-github-trends.mjs's own header for the full rationale:
+# a scheduled, real call to GitHub's own official, documented, public
+# search API (no scraping, no ToS violation), writing a real,
+# versioned, git-history-auditable file (data/github-trends.json) —
+# "the structure on GitHub" the idea agent's prompt now cites as an
+# external, clearly-labeled signal, distinct from AIWA's own real
+# network data. Runs on a schedule, commits the result — the deployed
+# app itself never makes a live call to GitHub, matching this
+# project's own "delayed, never blocked" discipline (§7): a static
+# same-origin fetch of whatever was last committed, never a live
+# cross-origin dependency the idea agent's own availability would
+# depend on.
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # once daily — comfortably within GitHub's own 10 req/min unauthenticated search rate limit
+  workflow_dispatch: # manual trigger, e.g. to seed the file for the first time right after this workflow is merged
+
+permissions:
+  contents: write
+
+jobs:
+  update-trends:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch real GitHub trends
+        run: node scripts/fetch-github-trends.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # already provided by Actions itself — raises the rate limit, never required for this script to work
+      - name: Commit updated trends data
+        # Mirrors ci.yml's own wasm-build job's exact commit-back
+        # pattern — same bot identity, same diff-before-commit guard so
+        # an unchanged run (e.g. GitHub's API having nothing new since
+        # yesterday) never creates an empty, noisy commit.
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/data/github-trends.json
+          if git diff --staged --quiet; then
+            echo "Trends data unchanged, nothing to commit."
+          else
+            git commit -m "chore: update GitHub trends data (automated)"
+            git push
+          fi
