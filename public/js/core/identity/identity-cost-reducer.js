@@ -28,24 +28,34 @@
 
 import { registerIdentityCost, initialIdentityCostState } from './identity-cost.js';
 
-export function applyIdentityEvent(state, event) {
+/**
+ * @param {import('./identity-cost.js').IdentityCostState} state
+ * @param {{ id: string, payload: any }} event
+ * @param {{ genesisSlot: number, costCurve: (slotsSinceGenesis: number) => number }} [churnConfig]
+ *   Optional, deployment-configured — see identity-cost.js's own header
+ *   for the full churn-resistance rationale. Omitted entirely, every
+ *   registration behaves exactly as it did before this mechanism
+ *   existed; no curve is silently enforced.
+ */
+export function applyIdentityEvent(state, event, churnConfig) {
   const payload = event.payload;
   if (!payload || payload.type !== 'identity-register') return state;
 
-  const { domain, signature, burnedLamports, at } = payload;
+  const { domain, signature, burnedLamports, slot, at } = payload;
   if (typeof domain !== 'string' || !domain || typeof signature !== 'string' || !signature || !Number.isFinite(burnedLamports)) {
     return state; // malformed — tolerant fold, same discipline as every other reducer
   }
 
-  const tx = { signature, err: null, incineratorBalanceDeltaLamports: burnedLamports, commitment: 'finalized' };
-  const result = registerIdentityCost(state, { domain, tx, minLamports: 0, now: at ?? 0 });
-  return result.state; // rejections (replay, already-registered, non-positive burn) leave state unchanged
+  const tx = { signature, err: null, incineratorBalanceDeltaLamports: burnedLamports, commitment: 'finalized', slot: Number.isFinite(slot) ? slot : null };
+  const result = registerIdentityCost(state, { domain, tx, minLamports: 0, now: at ?? 0, churnConfig });
+  return result.state; // rejections (replay, already-registered, non-positive burn, or — with churnConfig — burn below the real slot-indexed requirement) leave state unchanged
 }
 
 /**
  * registry(H_d) for identity cost — mirror of materializeModuleRegistry()
- * / materializeConservation().
+ * / materializeConservation(). `churnConfig` is threaded through
+ * unchanged — see applyIdentityEvent's own doc comment.
  */
-export function materializeIdentity(orderedEvents) {
-  return orderedEvents.reduce(applyIdentityEvent, initialIdentityCostState());
+export function materializeIdentity(orderedEvents, churnConfig) {
+  return orderedEvents.reduce((state, event) => applyIdentityEvent(state, event, churnConfig), initialIdentityCostState());
 }
