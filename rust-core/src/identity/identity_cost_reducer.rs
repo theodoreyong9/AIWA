@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use crate::event::Event;
-use crate::identity::{Commitment, IdentityCostState, NormalizedBurnTx};
+use crate::identity::{ChurnConfig, Commitment, IdentityCostState, NormalizedBurnTx};
 
 #[derive(Deserialize)]
 struct IdentityRegisterPayload {
@@ -9,6 +9,8 @@ struct IdentityRegisterPayload {
     signature: Option<String>,
     #[serde(rename = "burnedLamports")]
     burned_lamports: Option<i64>,
+    #[serde(default)]
+    slot: Option<i64>,
     at: Option<i64>,
 }
 
@@ -17,7 +19,9 @@ struct IdentityRegisterPayload {
 /// live in a standalone variable, never folded from H_d. See that
 /// file's header for the honest limit this fold has (pure, no network
 /// re-verification of the claimed burn amount during the fold itself).
-pub fn apply_identity_event(state: &mut IdentityCostState, event: &Event) {
+/// `churn_config`: §24 — threaded through unchanged, see ChurnConfig's
+/// own doc comment. `None` reproduces the exact prior behavior.
+pub fn apply_identity_event(state: &mut IdentityCostState, event: &Event, churn_config: Option<&ChurnConfig>) {
     let kind = event.payload.get("type").and_then(|v| v.as_str());
     if kind != Some("identity-register") {
         return;
@@ -29,15 +33,16 @@ pub fn apply_identity_event(state: &mut IdentityCostState, event: &Event) {
         return;
     }
 
-    let tx = NormalizedBurnTx { signature, err: None, incinerator_balance_delta_lamports: burned_lamports, commitment: Commitment::Finalized };
-    state.register_identity_cost(&domain, &tx, 0, p.at.unwrap_or(0));
+    let tx = NormalizedBurnTx { signature, err: None, incinerator_balance_delta_lamports: burned_lamports, commitment: Commitment::Finalized, slot: p.slot };
+    state.register_identity_cost(&domain, &tx, 0, p.at.unwrap_or(0), churn_config);
 }
 
 /// registry(H_d) for identity cost — mirror of materializeIdentity().
-pub fn materialize_identity(ordered_events: &[&Event]) -> IdentityCostState {
+/// `churn_config` threaded through unchanged.
+pub fn materialize_identity(ordered_events: &[&Event], churn_config: Option<&ChurnConfig>) -> IdentityCostState {
     let mut state = IdentityCostState::new();
     for event in ordered_events {
-        apply_identity_event(&mut state, event);
+        apply_identity_event(&mut state, event, churn_config);
     }
     state
 }
@@ -64,8 +69,8 @@ mod tests {
         let mut mars = EventDagCore::new();
         mars.add_event(vec![], serde_json::json!({"type": "genesis"})).unwrap();
 
-        let earth_identity = materialize_identity(&earth.topo_order());
-        let mars_identity = materialize_identity(&mars.topo_order());
+        let earth_identity = materialize_identity(&earth.topo_order(), None);
+        let mars_identity = materialize_identity(&mars.topo_order(), None);
 
         assert!(earth_identity.has_identity_cost("earth"));
         assert!(!mars_identity.has_identity_cost("earth"));
@@ -91,8 +96,8 @@ mod tests {
         backward.merge(&mars);
         backward.merge(&earth);
 
-        let identity_forward = materialize_identity(&forward.topo_order());
-        let identity_backward = materialize_identity(&backward.topo_order());
+        let identity_forward = materialize_identity(&forward.topo_order(), None);
+        let identity_backward = materialize_identity(&backward.topo_order(), None);
 
         assert!(identity_forward.has_identity_cost("earth"));
         assert!(identity_forward.has_identity_cost("mars"));
@@ -108,7 +113,7 @@ mod tests {
         dag.add_event(vec![genesis], serde_json::json!({"type": "identity-register", "domain": "mars", "signature": "sig-shared", "burnedLamports": 500, "at": 1}))
             .unwrap();
 
-        let identity = materialize_identity(&dag.topo_order());
+        let identity = materialize_identity(&dag.topo_order(), None);
         let earth_ok = identity.has_identity_cost("earth");
         let mars_ok = identity.has_identity_cost("mars");
         assert!(!(earth_ok && mars_ok));
@@ -123,7 +128,7 @@ mod tests {
             .unwrap();
         dag.add_event(vec![genesis], serde_json::json!({"type": "identity-register", "domain": "d1", "signature": "", "burnedLamports": 10}))
             .unwrap();
-        let identity = materialize_identity(&dag.topo_order());
+        let identity = materialize_identity(&dag.topo_order(), None);
         assert!(identity.registered.is_empty());
     }
 }
