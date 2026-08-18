@@ -9,6 +9,7 @@ on:
     # loop: build -> commit -> push -> triggers build -> commit -> ...
     paths-ignore:
       - 'public/js/wasm/**'
+      - 'public/data/github-trends.json' # the daily trends bot's own automated commit — no code changes, running the full suite for it every day would be pure waste, same reasoning as the WASM bot's own exclusion above
   pull_request:
     branches: [main]
 
