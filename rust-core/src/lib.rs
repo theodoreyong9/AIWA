@@ -7,6 +7,7 @@ mod event;
 mod identity;
 mod modules;
 mod pool_reducer;
+mod public_profile_reducer;
 
 pub use conservation::{
     apply_conservation_event, identity_derivation, materialize_conservation, Claim, ClaimStatus,
@@ -23,6 +24,7 @@ pub use economics::{
 pub use event::Event;
 pub use causal_condition_evaluator::{evaluate_condition, Condition, EvaluationContext, FunctionRegistry};
 pub use pool_reducer::{compute_weighted_draw, pot_address, verify_pool_payout, Contribution, Cycle, Draw, PoolConfig, PoolRejection, PoolState};
+pub use public_profile_reducer::{published_data_for_domain, PublicProfileState, PublishedValue};
 pub use identity::{
     apply_identity_event, derive_domain_id, materialize_identity, short_domain_label,
     verify_burn_proof, Commitment, IdentityCostState, NormalizedBurnTx, RegisterResult,
@@ -31,7 +33,7 @@ pub use identity::{
 };
 pub use modules::{
     apply_module_event, build_submission_event, check_submission_eligibility,
-    compute_module_hash, compute_module_rank, materialize_module_registry, record_nonce,
+    compute_module_hash, compute_module_rank, materialize_module_registry, rank_from_identity_and_cadence, record_nonce,
     select_identity_scheme, submit_module, validate_economic_config, validate_submission,
     verify_module_integrity, verify_submission_signature, AuditStatus, EconomicConfig,
     EligibilityResult, IdentityScheme, LastSubmission, ModuleEntry, ModuleRegistryState,
