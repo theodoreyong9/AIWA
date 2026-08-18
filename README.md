@@ -1919,3 +1919,41 @@ previous update to this README.)
   rather than left standing), Appendix H.32. 32 new Rust tests (7 + 25).
   218 Rust tests total (212 lib + 6 integration), 365 JS tests
   unchanged, zero warnings either language.
+- **Performed a systematic JS/Rust function-by-function sweep**, not
+  another reactive fix triggered by the next task — the direct
+  response to a real pattern named across the last several entries:
+  every cross-language gap so far had been found only because some
+  other task happened to force the comparison, never by deliberately
+  checking. Method: listed every real reducer file in `public/js/core/`
+  (recognized by the `initial*State`/`apply*Event`/`materialize*`
+  pattern), matched against `rust-core/src/`, excluded files
+  legitimately expected to have no mirror (browser/network-only code,
+  pure local UI state, `EventDag`'s own `subscribe()`, already
+  documented as JS-only), and directly compared exported function names
+  for every remaining pair.
+  **Two real gaps found, not zero** — itself the important finding: a
+  systematic pass turning up nothing would have been weak evidence the
+  concern was overstated; finding real gaps on the first pass is
+  stronger evidence it was a real, recurring risk.
+  **Small gap closed**: `rankFromIdentityAndCadence` (a composition of
+  two already-correct, already-mirrored pieces) had no Rust equivalent
+  at all — added `rank_from_identity_and_cadence` to `module_rank.rs`,
+  2 new tests mirroring the JS suite exactly.
+  **Larger gap closed**: `public-profile-reducer.js` — the entire
+  hyperprofile mechanism (§27.6), following the exact same reducer
+  shape as every other already-mirrored file — had no Rust file at
+  all, not a signature mismatch on an existing one. Built
+  `public_profile_reducer.rs` from scratch, 10 tests, including one
+  deliberately preserving a subtle JS behavior rather than "cleaning
+  it up": an explicit `null` (real unpublish) is distinguished from
+  the `value` field being entirely absent from a payload (which JS's
+  `undefined !== null` sends down the "set" branch instead) — mirrored
+  precisely via `Option<&Value>` so a converged H_d materializes
+  identically in both languages even for this edge case.
+  **Honest about what this sweep is and isn't**: one deliberate pass,
+  not an automated or continuous guarantee — further undiscovered gaps
+  remain a live possibility, stated as such in the whitepaper rather
+  than implied to be resolved. New §17 matrix row (cross-language
+  parity as its own named risk category), Appendix H.33. 12 new Rust
+  tests (2 + 10). 230 Rust tests total (224 lib + 6 integration), 365
+  JS tests unchanged, zero warnings either language.
