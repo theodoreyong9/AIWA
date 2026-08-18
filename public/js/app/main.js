@@ -28,7 +28,7 @@ import { materializeG } from '../core/economics/g.js';
 import { deriveDomainId, shortDomainLabel } from '../core/identity/domain-id.js';
 import { loadSolanaWeb3, generateKeypair, keypairFromSecretKey, encryptSecretKey, decryptSecretKey } from '../core/identity/solana-wallet.js';
 import { broadcastAndVerifyBurn } from '../core/identity/identity-flow.js';
-import { hasIdentityCost } from '../core/identity/identity-cost.js';
+import { hasIdentityCost, linearCostCurve } from '../core/identity/identity-cost.js';
 import { materializeIdentity } from '../core/identity/identity-cost-reducer.js';
 import { SOLANA_NETWORKS, DEFAULT_NETWORK } from '../core/identity/solana-networks.js';
 import { materializeModuleRegistry } from '../core/modules/module-registry-reducer.js';
@@ -320,7 +320,7 @@ class DomainReplica {
   }
   materializePublicProfiles() { return materializePublicProfiles(this.dag.topoOrder()); }
 
-  materializeIdentity() { return materializeIdentity(this.dag.topoOrder()); }
+  materializeIdentity() { return materializeIdentity(this.dag.topoOrder(), identityChurnConfig ?? undefined); }
 
   /**
    * Sends `amount` of the domain's own accrued balance to `toDomainId`:
@@ -354,6 +354,15 @@ let activeThemeId = DEFAULT_THEME_ID; // §27.5 presentation independence — a 
 // hardware, exactly like §16.1 already discusses for the heartbeat
 // interval Δ.
 let cadenceVdfIterations = 200000;
+// §24 churn resistance: deployment-wide, real-slot-indexed identity
+// cost (identity-cost.js's own header has the full rationale). OFF by
+// default — this is a genuine, unresolved policy question (a legitimate
+// late joiner years into a mature deployment pays the same escalated
+// cost a churn attempt would), not something this reference
+// implementation should silently decide for every deployment. A
+// deployment that wants it configures genesisSlot + lamportsPerSlot in
+// Parameters.
+let identityChurnConfig = null;
 let myDomain = null; // the one real domain this app instance represents — null until a wallet exists
 let testPeers = new Map(); // id -> DomainReplica, testing-only, never the primary UI concept
 let submissionState = initialSubmissionState();
@@ -479,7 +488,7 @@ async function registerIdentityViaBurn() {
     // local variable (see identity-cost-reducer.js's header for why
     // that used to be a real problem).
     const id = await myDomain.dag.addEvent([myDomain.lastEventId], {
-      type: 'identity-register', domain: myDomain.id, signature: result.signature, burnedLamports: result.burnedLamports, at: myDomain.epoch,
+      type: 'identity-register', domain: myDomain.id, signature: result.signature, burnedLamports: result.burnedLamports, slot: result.slot, at: myDomain.epoch,
     });
     myDomain.lastEventId = id;
     setMsg('burn-msg', `✅ Registered — tx ${result.signature.slice(0, 12)}…`, 'success');
@@ -1292,6 +1301,22 @@ async function main() {
       log(`Cadence VDF difficulty set to ${n} iterations — a real, felt cost on every future epoch advance for this domain (R11).`);
     }
   });
+  const updateChurnConfig = () => {
+    const enabled = document.getElementById('churn-config-enabled').value === 'on';
+    if (!enabled) {
+      identityChurnConfig = null;
+      log('Identity churn resistance disabled — no real-slot-indexed cost curve enforced (§24).');
+      return;
+    }
+    const genesisSlot = parseInt(document.getElementById('churn-genesis-slot').value, 10);
+    const lamportsPerSlot = parseInt(document.getElementById('churn-lamports-per-slot').value, 10);
+    if (!Number.isInteger(genesisSlot) || !Number.isInteger(lamportsPerSlot) || lamportsPerSlot < 0) return;
+    identityChurnConfig = { genesisSlot, costCurve: linearCostCurve({ baseLamports: 0, lamportsPerSlot }) };
+    log(`Identity churn resistance enabled — genesis slot ${genesisSlot}, ${lamportsPerSlot} lamports/slot (§24, a deployment policy choice, not a prescribed default).`);
+  };
+  document.getElementById('churn-config-enabled').addEventListener('change', updateChurnConfig);
+  document.getElementById('churn-genesis-slot').addEventListener('change', updateChurnConfig);
+  document.getElementById('churn-lamports-per-slot').addEventListener('change', updateChurnConfig);
   document.getElementById('folder-panel-close').addEventListener('click', closeFolderPanel);
   document.getElementById('folder-panel-label').addEventListener('change', async (e) => {
     if (!myDomain || !openFolderId) return;
