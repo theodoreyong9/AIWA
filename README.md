@@ -2014,3 +2014,35 @@ previous update to this README.)
   New whitepaper §27.10, Appendix H.34. 13 new JS tests, 8 new Rust
   tests. 378 JS tests total, 238 Rust tests (232 lib + 6 integration),
   zero warnings either language.
+- **Deepened the idea agent's context — usage over registration,
+  recency over all-time, multiple contacts over one (§28)**, at direct
+  request after being asked whether it enriched itself well from plugin
+  submissions. The honest answer surfaced something real: an earlier
+  YourMine-inspired "mined-pattern" context system had been explored
+  and deliberately set aside (Appendix H.27); the current, narrower
+  idea agent was genuinely shallower than intended — a flat registered-
+  module list and an all-time category count, unable to distinguish
+  "what a domain actually uses" from "what it merely registered once,"
+  or "three people independently converged on this" from "one prolific
+  contact likes this category."
+  **Three real signals added**, all from data already public by design
+  (the module registry) or the caller's own private local state
+  (desktop pins, own published data) — never another domain's private
+  or financial state, never a new write path anywhere:
+  usage-over-authorship (real desktop pins + real published module
+  data, not just registration); recency-weighted trending categories
+  (only the most recently registered third of the network, so 3 brand-
+  new modules in one category outweighs months of stale accumulation);
+  and category gaps / multi-contact overlap (real set operations —
+  confirmed with an adversarial test that one contact's two modules in
+  the same category does NOT count as a multi-contact pattern, only 2+
+  genuinely distinct contacts do).
+  **The structural "no path into consensus" guarantee was re-checked
+  directly, not assumed to survive**: every new signal is read-only,
+  and the function this feeds still only ever produces a text prompt —
+  confirmed by construction, the same as before this change.
+  **Wired into the real app**, not left tested-but-unused: both real
+  call sites in `main.js` now pass real pinned-module and published-
+  data results in. New whitepaper §28 update, Appendix H.35. 9 new
+  tests (19 total in `idea-agent.test.mjs`, up from 10). 387 JS tests
+  overall, zero warnings.
