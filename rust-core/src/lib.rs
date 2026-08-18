@@ -1,3 +1,4 @@
+mod causal_condition_evaluator;
 mod conservation;
 mod core;
 mod dag;
@@ -19,6 +20,7 @@ pub use economics::{
     ScarcityState, Snapshot, Theta, GENESIS_FORMULA_ID, GENESIS_FORMULA_PARAMS,
 };
 pub use event::Event;
+pub use causal_condition_evaluator::{evaluate_condition, Condition, EvaluationContext, FunctionRegistry};
 pub use identity::{
     apply_identity_event, derive_domain_id, materialize_identity, short_domain_label,
     verify_burn_proof, Commitment, IdentityCostState, NormalizedBurnTx, RegisterResult,
