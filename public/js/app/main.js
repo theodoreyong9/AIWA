@@ -43,6 +43,7 @@ import {
   potAddress, materializePool, verifyPoolPayout, computeWeightedDraw,
 } from '../core/pool/pool-reducer.js';
 import { materializeGenericContracts, verifyGenericRelease } from '../core/generic-contract-reducer.js';
+import { extractModulePattern, summarizeModulePatterns } from '../core/ai/module-pattern-miner.js';
 import {
   layoutFromPinnedIds, allModuleIdsInLayout, moveItem, createFolderFromDrop,
   mergeIntoFolder, ejectFromFolder, renameFolder, removeModuleFromLayout,
@@ -400,6 +401,40 @@ function loadExternalTrendsOnce() {
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => { cachedExternalTrends = data; })
     .catch(() => { /* offline, partitioned, or file genuinely absent — cachedExternalTrends simply stays null, never blocks anything */ });
+}
+
+// §28's idea agent, further deepened at the user's own direct request
+// after seeing a real YourMine pattern-mining system (mine-patterns.js
+// / ym-spec.json) and asking for AIWA's own equivalent: which real ctx
+// primitives already-registered modules actually use, mined from real,
+// already-hash-verified source (loadVerifiedModuleCode — the exact
+// content-addressing guarantee YourMine's own raw-fetch miner never
+// had). Unlike the trends fetch above, this has no single external
+// bot to poll — AIWA has no centralized module manifest a bot could
+// crawl (module-pattern-miner.js's own header explains why) — so this
+// mines whatever modules THIS domain already has in its own real
+// registry. Bounded to a small sample and never awaited inside a
+// render function, for the same reason as the trends fetch: mining
+// works identically whether it has finished, is still running, or
+// never started at all.
+let cachedMechanismPatterns = null;
+let mechanismMiningStarted = false;
+const MAX_MODULES_TO_MINE = 20; // bounded — real network fetches per module, never worth doing for a potentially large registry on every idea-agent open
+function mineMechanismPatternsOnce(registryState) {
+  if (mechanismMiningStarted) return;
+  mechanismMiningStarted = true;
+  const entries = Object.values(registryState.modules).slice(0, MAX_MODULES_TO_MINE);
+  Promise.all(entries.map(async (entry) => {
+    try {
+      const code = await loadVerifiedModuleCode(entry);
+      return extractModulePattern(code, entry.id);
+    } catch {
+      return null; // an unreachable codeUrl or a failed integrity check simply doesn't contribute — never blocks the others
+    }
+  })).then((results) => {
+    const extractions = results.filter(Boolean);
+    cachedMechanismPatterns = summarizeModulePatterns(extractions);
+  }).catch(() => { /* cachedMechanismPatterns simply stays null */ });
 }
 let myDomain = null; // the one real domain this app instance represents — null until a wallet exists
 let testPeers = new Map(); // id -> DomainReplica, testing-only, never the primary UI concept
@@ -898,9 +933,10 @@ function renderDomainScreen() {
   const localIdentityState = myDomain.materializeIdentity();
 
   loadExternalTrendsOnce();
+  mineMechanismPatternsOnce(registry);
   const myPinnedModuleIds = pinnedIds(myDomain.id);
   const myPublishedData = publishedDataForDomain(myDomain.materializePublicProfiles(), myDomain.id);
-  const ideaSnapshot = collectContextSnapshot(registry, myDomain.id, realContactIds(), { pinnedModuleIds: myPinnedModuleIds, publishedData: myPublishedData }, cachedExternalTrends);
+  const ideaSnapshot = collectContextSnapshot(registry, myDomain.id, realContactIds(), { pinnedModuleIds: myPinnedModuleIds, publishedData: myPublishedData }, cachedExternalTrends, cachedMechanismPatterns);
   const contactCount = Object.keys(ideaSnapshot.contactModules).length;
   document.getElementById('idea-network-info').textContent =
     `Sees: ${ideaSnapshot.myModules.length} of your modules, ${contactCount} contact${contactCount === 1 ? '' : 's'} with registered modules.`;
@@ -1178,10 +1214,11 @@ async function requestModuleIdea() {
 
     const registry = myDomain.materializeModules();
     loadExternalTrendsOnce();
+    mineMechanismPatternsOnce(registry);
     const snapshot = collectContextSnapshot(registry, myDomain.id, realContactIds(), {
       pinnedModuleIds: pinnedIds(myDomain.id),
       publishedData: publishedDataForDomain(myDomain.materializePublicProfiles(), myDomain.id),
-    }, cachedExternalTrends);
+    }, cachedExternalTrends, cachedMechanismPatterns);
     const systemPrompt = buildIdeaSystemPrompt(snapshot);
 
     msgEl.textContent = 'Loading on-device model — first run downloads it, later runs reuse it…';
