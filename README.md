@@ -2085,3 +2085,32 @@ previous update to this README.)
   commit, same reasoning already applied to the WASM-rebuild bot.
   New whitepaper §28 update, Appendix H.36. 12 new tests (6 +
   6). 399 JS tests total, zero warnings.
+- **Adapted a real YourMine pattern-mining system for the idea agent
+  (§28)**, after the user shared its actual source
+  (`mine-patterns.js`/`ym-spec.json`) and asked directly whether it
+  inspired further work. Two real, structural reasons it couldn't be
+  ported directly, both confirmed before writing any code: YourMine
+  mines one centralized `files.json` manifest — AIWA's module
+  registration is permissionless and DAG-replicated, with no
+  equivalent centralized, crawlable list, so unlike the GitHub-trends
+  bot, this couldn't be an external scheduled bot at all; and
+  `ym-spec.json` is built to feed a model code-generation templates
+  (`skeleton_by_intent`) — code generation stays outside AIWA's
+  confirmed AI scope, already stated more than once this revision.
+  **`module-pattern-miner.js`** mines whatever real modules THIS domain
+  already has in its own materialized registry, using already-hash-
+  verified source (`loadVerifiedModuleCode` — a real integrity
+  guarantee the YourMine original's raw, unverified fetch never had),
+  and reports which real `ctx` primitives (confirmed directly against
+  `module-sandbox.js`'s own real construction, not the YourMine
+  original's different surface) real modules actually use — and,
+  genuinely new, **which are never used by any mined module at all** —
+  a concrete "nobody's tried this mechanism yet" hook, distinct from a
+  category gap. Deliberately stops at frequency data: a dedicated test
+  confirms the rendered prompt never contains a code skeleton or the
+  word "skeleton" anywhere.
+  Bounded to 20 modules, wired into `main.js` the same lazy, cached,
+  never-blocking way as the trends fetch, reusing the exact same
+  hash-verifying fetch `mountModule()` itself uses to run a module at
+  all. New whitepaper §28 update, Appendix H.37. 16 new tests (11 + 5).
+  415 JS tests total, zero warnings.
