@@ -21,6 +21,54 @@
 // Uses only the general-purpose ctx primitives (postCausalEvent,
 // queryCausalState, transferClaim) — nothing jackpot-specific was ever
 // added to the sandbox bridge itself, on purpose.
+//
+// ── What using it actually looks like ────────────────────────────
+//
+// Open the plugin, enter an amount, press Donate. Behind that one
+// click: a real claim is issued from your own accrued balance, really
+// transferred (a real, signed Conservation transfer — your balance
+// genuinely goes down, right then, not just in this UI) into the pot's
+// address, and recorded as this cycle's contribution. The screen
+// updates to show the cycle's real donation count (e.g. "3 / 5") and
+// the real pot total so far — both read back from materialized state,
+// never a locally-held running counter.
+//
+// Once a cycle reaches its configured length (CYCLE_LENGTH below —
+// 5 real donations, not 5 minutes: there is no wall clock anywhere in
+// this contract), the "Check & trigger payout" button becomes
+// meaningful: pressing it recomputes the deterministic weighted draw
+// from the cycle's real donation history and, if a closed, unpaid
+// cycle exists, posts the real release events that move every real
+// donation claim in that cycle to the real, recomputed winner.
+// Anyone's click does this correctly — the winner doesn't need to be
+// the one who presses it, and pressing it does not, by itself,
+// authorize anything; the recomputation does. If no cycle is closed
+// yet, the button simply has nothing to do.
+//
+// ── A worked example ──────────────────────────────────────────────
+//
+// Alice and Bob both open this plugin on the same pot. Alice donates
+// 30, Bob donates 20 — 2 of the 5 needed. Alice donates again (20) and
+// Bob again (30) — 4 of 5. Whoever donates the 5th real contribution
+// closes the cycle. Either Alice or Bob (or a third party who never
+// donated at all — permitted, and harmless, since the recomputation
+// itself is what decides) presses "Check & trigger payout": the real
+// draw is recomputed from the 5 real contributions actually recorded
+// (weighted by amount — Alice contributed 50 of the 100 total, so she
+// has roughly even odds against Bob's 50, not a coin flip regardless
+// of amount), and the real winner receives all 100 AIWA, moved via
+// real 'pot-release' events, one per donation claim in that cycle.
+//
+// ── Registering this as a real, running module ───────────────────
+//
+// This file is ordinary, permissionless module code — nothing about it
+// requires platform involvement to deploy. From the app: Domain screen
+// → Submit plugin code, paste this file's contents, give it a real
+// codeHash (computed from the exact bytes being submitted) and a
+// codeUrl it can be fetched from later, and submit — the same open
+// registration path (§27.4) every module uses, no allow-list, no
+// approval step. Once registered and pinned to a desktop, opening it
+// runs the flow described above for real.
 
 (function () {
   const POOL_ID = 'community-pot';
