@@ -203,12 +203,27 @@ function hashToTicketIndex(hexHash, totalTickets) {
   return Number(bigVal % BigInt(totalTickets));
 }
 
+import { evaluateCondition } from '../causal-condition-evaluator.js';
+
 /**
  * The injected verifier conservation-bridge.js's 'pot-release' event
  * calls — see that file's header for why this is safe without a
  * signature. Every check here is a recomputation against the real,
  * causally-ordered contribution history and the real Conservation
  * state, never a trust decision made on anyone's say-so.
+ *
+ * §27.8's composable-primitives prototype: this pool's structural
+ * checks (does this pot/cycle exist, is it closed, does this claim
+ * belong to it) stay pool-specific glue — inherent to what a pool IS,
+ * not generalizable. The final, security-critical checks — real claim
+ * ownership, and that recomputing the deterministic draw genuinely
+ * matches the claimed winner — are expressed as a declarative
+ * condition evaluated by the shared, generic evaluator
+ * (causal-condition-evaluator.js) instead of hand-written inline,
+ * exactly as this vocabulary was designed to replace. Validates the
+ * evaluator against this real, already-audited contract's own security
+ * logic, not only a standalone demonstration: this function's own
+ * behavior, and every existing test in this file, is unchanged.
  *
  * @param {ReturnType<typeof initialPoolState>} poolState
  * @param {import('../conservation/conservation.js').ConservationState} conservationState
@@ -232,10 +247,11 @@ export async function verifyPoolPayout(poolState, conservationState, claimId, fr
   const belongsToCycle = cycle.contributions.some((c) => c.claimId === claimId);
   if (!belongsToCycle) return false; // this claim was never part of this cycle's real contributions
 
-  const claim = conservationState.claims[claimId];
-  if (!claim || claim.owner !== from || claim.status !== 'active') return false; // already released, or never really there
-
-  const draw = await computeWeightedDraw(poolId, cycleIndex, cycle.contributions);
-  if (!draw) return false;
-  return to === draw.winnerDomain;
+  const condition = {
+    all: [
+      { type: 'ownership', claimId, expectedOwner: from },
+      { type: 'deterministic-match', function: 'computeWeightedDraw', args: [poolId, cycleIndex, cycle.contributions], outputPath: 'winnerDomain', expectedOutput: to },
+    ],
+  };
+  return evaluateCondition(condition, { conservationState, functionRegistry: { computeWeightedDraw } });
 }
