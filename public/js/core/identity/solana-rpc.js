@@ -15,6 +15,15 @@
 // identity-cost.js and is fully covered there — this file's only job is
 // producing the NormalizedBurnTx shape that verifyBurnProof() expects,
 // from a real transaction signature.
+//
+// Churn resistance (§24, identity-cost.js's own header): `result.slot`
+// is a standard, documented field on Solana's `getTransaction` RPC
+// response — already present in the exact same parsed object this file
+// already reads `result.transaction`/`result.meta.err`/
+// `result.meta.preBalances`/`postBalances` from, but never previously
+// read itself, silently discarded. Now captured into `NormalizedBurnTx`
+// — no new RPC call, no new network dependency, only one more field
+// read from a response already being fetched for every registration.
 
 import { SOLANA_INCINERATOR_ADDRESS } from './identity-cost.js';
 import { networkConfig, DEFAULT_NETWORK } from './solana-networks.js';
@@ -67,6 +76,7 @@ export async function fetchNormalizedBurnTx(signature, { network = DEFAULT_NETWO
       err: result.meta.err,
       incineratorBalanceDeltaLamports: 0,
       commitment: 'finalized',
+      slot: Number.isFinite(result.slot) ? result.slot : null,
     };
   }
 
@@ -78,5 +88,6 @@ export async function fetchNormalizedBurnTx(signature, { network = DEFAULT_NETWO
     err: result.meta.err,
     incineratorBalanceDeltaLamports: post - pre,
     commitment: 'finalized',
+    slot: Number.isFinite(result.slot) ? result.slot : null,
   };
 }
