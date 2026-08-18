@@ -1968,3 +1968,49 @@ previous update to this README.)
   and its own honest, stated limits — found by verifying the table
   against itself rather than reciting it from memory, the exact
   discipline this project keeps asking of itself.
+- **Closed the actual last mile of composability (§27.10)** — asked
+  directly, after §27.9's own validated evaluator shipped, whether the
+  composability promise was actually delivered yet. It was not: the
+  evaluator worked, but every real use of it was still hand-wired
+  platform code (`pool-reducer.js`'s own rewritten `verifyPoolPayout`).
+  A third party had no way to define a genuinely new contract without
+  touching platform code — exactly the problem §27.8 set out to solve.
+  **The one thing that had to be gotten right**: a release event can
+  never supply its own verification condition — that would let any
+  attacker attach a trivially-true condition and drain any contract's
+  real funds. Safety comes from separating *when* a condition can be
+  supplied (once, at mint time, permanent forever after — the same
+  discipline `pool-init`/`formula-register` already use) from *when*
+  it's merely referenced (a release event supplies only `claimId`/
+  `from`/`to` and a `contractId`, substituted into the already-fixed
+  template's placeholders, never used to construct new logic).
+  `generic-contract-reducer.js`/`.rs` built in both languages —
+  `verifyGenericRelease` tested directly against the exact attack this
+  exists to prevent: an attacker smuggling an extra `condition` field
+  into a release attempt, confirmed completely ignored, using a real
+  minted condition chosen to be unambiguously false so the test can
+  actually distinguish "the real condition was checked" from "the
+  smuggled one was used instead."
+  **Demonstrated, not just claimed**: a real 2-of-2 threshold-release
+  escrow — sharing zero code with `pool-reducer.js` — built entirely as
+  one `count` condition over real approval events, run through the
+  actual deployed application's own real, two-phase materialization
+  (not a standalone shortcut): correctly withheld with 1 of 2
+  approvals, correctly released once both real approvals existed.
+  Composed into `main.js`'s real `pot-release` verifier alongside
+  pool's own check, tried in sequence — safe because a `releaseProof`'s
+  own shape makes the two structurally distinguishable.
+  **Two honest limits named, not hidden**: doesn't cover contracts
+  needing stateful accumulation before a condition can be evaluated
+  (pool's own weighted draw stays its own dedicated reducer, correctly
+  — this was never meant to force-fit that shape); and the `unique`
+  primitive can't track used keys across the fold within this specific
+  mechanism, so contracts needing real mint-once uniqueness still need
+  their own reducer. Rust's mirror needed one honest extra piece JS
+  doesn't: an explicit, hand-written condition parser
+  (`parse_condition`), since the `Condition` enum has no direct serde
+  derive for its shape — stated as a real cross-language difference,
+  not smoothed over.
+  New whitepaper §27.10, Appendix H.34. 13 new JS tests, 8 new Rust
+  tests. 378 JS tests total, 238 Rust tests (232 lib + 6 integration),
+  zero warnings either language.
