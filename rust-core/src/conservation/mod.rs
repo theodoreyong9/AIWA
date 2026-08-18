@@ -205,7 +205,7 @@ impl ConservationState {
 }
 
 pub mod conservation_bridge;
-pub use conservation_bridge::{apply_conservation_event, materialize_conservation, ConservationBridgeState};
+pub use conservation_bridge::{apply_conservation_event, materialize_conservation, ConservationBridgeState, PotReleaseVerifier};
 
 #[cfg(test)]
 mod tests {
