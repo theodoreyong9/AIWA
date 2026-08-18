@@ -36,7 +36,7 @@ import { verifyBurnProof } from './identity-cost.js';
  * @param {typeof import('@solana/web3.js')} solanaWeb3
  * @param {import('@solana/web3.js').Keypair} keypair
  * @param {{ lamports: number, network?: keyof typeof import('./solana-networks.js').SOLANA_NETWORKS }} params
- * @returns {Promise<{ signature: string, burnedLamports: number }>}
+ * @returns {Promise<{ signature: string, burnedLamports: number, slot: number | null }>}
  */
 export async function broadcastAndVerifyBurn(solanaWeb3, keypair, { lamports, network = DEFAULT_NETWORK }) {
   const { rpcEndpoint } = networkConfig(network);
@@ -54,5 +54,5 @@ export async function broadcastAndVerifyBurn(solanaWeb3, keypair, { lamports, ne
     throw new Error(`Burn succeeded (${signature}) but did not verify: ${check.reason}`);
   }
 
-  return { signature, burnedLamports: tx.incineratorBalanceDeltaLamports };
+  return { signature, burnedLamports: tx.incineratorBalanceDeltaLamports, slot: tx.slot ?? null };
 }
