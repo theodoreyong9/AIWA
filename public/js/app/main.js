@@ -878,12 +878,14 @@ function renderDomainScreen() {
   const registry = myDomain.materializeModules();
   const localIdentityState = myDomain.materializeIdentity();
 
-  const ideaSnapshot = collectContextSnapshot(registry, myDomain.id, realContactIds());
+  const myPinnedModuleIds = pinnedIds(myDomain.id);
+  const myPublishedData = publishedDataForDomain(myDomain.materializePublicProfiles(), myDomain.id);
+  const ideaSnapshot = collectContextSnapshot(registry, myDomain.id, realContactIds(), { pinnedModuleIds: myPinnedModuleIds, publishedData: myPublishedData });
   const contactCount = Object.keys(ideaSnapshot.contactModules).length;
   document.getElementById('idea-network-info').textContent =
     `Sees: ${ideaSnapshot.myModules.length} of your modules, ${contactCount} contact${contactCount === 1 ? '' : 's'} with registered modules.`;
 
-  const pinned = new Set(pinnedIds(myDomain.id));
+  const pinned = new Set(myPinnedModuleIds);
   const modules = Object.values(registry.modules).map((m) => ({
     ...m,
     rank: rankFromIdentityAndCadence(localIdentityState, gState.cadence, m.author, myDomain.currentRewardParams()),
@@ -1155,7 +1157,10 @@ async function requestModuleIdea() {
     }
 
     const registry = myDomain.materializeModules();
-    const snapshot = collectContextSnapshot(registry, myDomain.id, realContactIds());
+    const snapshot = collectContextSnapshot(registry, myDomain.id, realContactIds(), {
+      pinnedModuleIds: pinnedIds(myDomain.id),
+      publishedData: publishedDataForDomain(myDomain.materializePublicProfiles(), myDomain.id),
+    });
     const systemPrompt = buildIdeaSystemPrompt(snapshot);
 
     msgEl.textContent = 'Loading on-device model — first run downloads it, later runs reuse it…';
