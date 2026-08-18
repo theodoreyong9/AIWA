@@ -40,8 +40,9 @@ import { collectContextSnapshot, buildIdeaSystemPrompt, sanitizeIdeaReply } from
 import { detectWebGpuSupport, loadEngine, streamChat } from '../core/ai/webllm-engine.js';
 import { materializePublicProfiles, publishedDataForDomain } from '../core/profile/public-profile-reducer.js';
 import {
-  potAddress, materializePool, verifyPoolPayout,
+  potAddress, materializePool, verifyPoolPayout, computeWeightedDraw,
 } from '../core/pool/pool-reducer.js';
+import { materializeGenericContracts, verifyGenericRelease } from '../core/generic-contract-reducer.js';
 import {
   layoutFromPinnedIds, allModuleIdsInLayout, moveItem, createFolderFromDrop,
   mergeIntoFolder, ejectFromFolder, renameFolder, removeModuleFromLayout,
@@ -288,29 +289,47 @@ class DomainReplica {
    * pool-reducer.js's own header — the general causal-contract
    * primitive a real community jackpot is one application of, not what
    * this mechanism is specifically for); Conservation needs pool state
+   * (and, since §27.9's own last-mile work, generic-contract state too)
    * to verify 'pot-release' events. Resolved the same way every other
    * cross-reducer dependency in this project is — an explicit, ordered
    * pass, not a hidden import: (1) materialize Conservation with no
    * pot-release verifier at all (the safe default — every pot-release
    * is rejected, so this first pass simply excludes any payouts that
-   * haven't happened yet); (2) materialize pool state from that; (3)
-   * re-materialize Conservation, now with a real verifier closing over
-   * the pool state from step 2, so legitimate pot-release events are
-   * finally recognized and applied. A claim that has already been
-   * legitimately released can never be re-contributed regardless of
-   * which pass computed a given check against it — the ownership test
-   * alone already prevents that — so this two-pass order changes
-   * nothing about which contributions are valid, only whether payouts
-   * already made are reflected in the final view.
+   * haven't happened yet); (2) materialize pool state AND generic-
+   * contract state from that; (3) re-materialize Conservation, now
+   * with a real verifier closing over both, so legitimate pot-release
+   * events — whether for a pool or for a permissionlessly-minted
+   * generic contract — are finally recognized and applied. A claim
+   * that has already been legitimately released can never be
+   * re-contributed regardless of which pass computed a given check
+   * against it — the ownership test alone already prevents that — so
+   * this two-pass order changes nothing about which contributions are
+   * valid, only whether payouts already made are reflected in the
+   * final view.
+   *
+   * The composed verifier tries the pool-specific check first, then
+   * the generic-contract check — a pot-release event's releaseProof
+   * carries either {poolId, cycleIndex} or {contractId}, structurally
+   * distinguishable, so trying both in order is safe: a malformed or
+   * mismatched releaseProof simply fails both and the release is
+   * rejected, exactly matching every other reducer's tolerant-fold
+   * discipline.
    */
   async materializeConservation() {
     const events = this.dag.topoOrder();
     const provisional = await materializeConservation(events);
     const poolState = materializePool(events, provisional.conservation);
-    const verifyPotRelease = (claimId, from, to, releaseProof, conservationState) =>
-      verifyPoolPayout(poolState, conservationState, claimId, from, to, releaseProof);
+    const genericContractState = materializeGenericContracts(events);
+    const verifyPotRelease = async (claimId, from, to, releaseProof, conservationState) => {
+      const poolOk = await verifyPoolPayout(poolState, conservationState, claimId, from, to, releaseProof);
+      if (poolOk) return true;
+      return verifyGenericRelease(genericContractState, conservationState, events, { computeWeightedDraw }, claimId, from, to, releaseProof);
+    };
     return materializeConservation(events, verifyPotRelease);
   }
+
+  /** The generic-contract view alone — a plugin defining a new permissionless contract (§27.9) reads this to see its own minted condition. */
+  materializeGenericContracts() { return materializeGenericContracts(this.dag.topoOrder()); }
 
   /** The pool view alone — most callers (a plugin's own UI, e.g. the jackpot example) want this directly, not Conservation's full state. */
   async materializePool() {
