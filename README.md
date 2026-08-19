@@ -1,402 +1,2859 @@
-This project is the Safe version of the YourMine project
-https://github.com/theodoreyong9/YourMinedApp
+AIWA — Autonomous Interplanetary Web Application
 
-# AIWA — Autonomous Interplanetary Web Application
+«A browser-native, delay-tolerant application architecture built around a content-addressed event DAG, deterministic materialized state, cryptographic identity, composable contracts, and sandboxed third-party modules.»
 
-Reference implementation of the AIWA architecture: an event DAG (H_d) plus a materialized state view A = G(H_d, θ), deployed as a static app with no server and no build step.
+AIWA is a reference implementation of an architecture in which application state is derived from an event DAG:
 
-The ledger has two interchangeable backends:
+H_d = event DAG
+A   = G(H_d, θ)
 
-- **`public/js/core/event-dag.js`** — pure JS, zero dependencies, runs in production today.
-- **`rust-core/`** — Rust compiled to WASM, replaces the JS version for performance and third-party module sandboxing.
+The authoritative state of a domain is not stored as a mutable database row. It is materialized by replaying a deterministic set of events.
 
-`public/js/core/ledger-bridge.js` is the sole entry point. It loads WASM if present, falls back to JS. No other code depends on which backend is active. Both backends are verified against each other via shared test vectors and cross-language parity scripts.
+The application is designed to continue operating while disconnected, exchange events when connectivity returns, and converge on a deterministic materialized view from the same event set.
+
+AIWA is intentionally implemented as a static web application:
+
+- no application server;
+- no build step required for production JavaScript;
+- no authoritative backend database;
+- local persistence through IndexedDB;
+- optional Rust/WASM acceleration;
+- real cryptographic signatures;
+- real Solana identity-cost transactions;
+- delay-tolerant transport abstraction;
+- sandboxed third-party modules.
+
+The current implementation is a reference implementation and research prototype, not a claim of production-grade consensus or formal security.
+
+Several important properties are tested extensively. Others remain explicitly open, particularly:
+
+- full adversarial convergence analysis;
+- numeric/float consensus semantics;
+- protocol versioning;
+- formal conformance vectors;
+- live JS/WASM result comparison in the browser;
+- stronger guarantees around the cadence VDF;
+- the limits of the plugin sandbox;
+- the security implications of external-chain identity registration;
+- an authoritative AI layer.
+
+The project deliberately distinguishes between what is implemented, what is tested, what is conditional, and what remains open.
 
 ---
 
-## Repository structure
+Table of Contents
 
-```
+- "Why AIWA exists" (#why-aiwa-exists)
+- "Security position" (#security-position)
+- "Core model" (#core-model)
+- "Architecture" (#architecture)
+- "Repository structure" (#repository-structure)
+- "Ledger — Event DAG" (#ledger--event-dag)
+- "Materialization — "A = G(H_d, θ)"" (#materialization--a--gh_d-θ)
+- "Economics" (#economics)
+- "Cadence and VDF" (#cadence-and-vdf)
+- "Reward function" (#reward-function)
+- "Scarcity" (#scarcity)
+- "Formula registry" (#formula-registry)
+- "Sybil and identity economics" (#sybil-and-identity-economics)
+- "Conservation" (#conservation)
+- "Identity and "c_id"" (#identity-and-c_id)
+- "Solana integration" (#solana-integration)
+- "Third-party modules" (#third-party-modules)
+- "Module registry" (#module-registry)
+- "Module signing" (#module-signing)
+- "Module sandbox" (#module-sandbox)
+- "Module "ctx" API" (#module-ctx-api)
+- "Transport" (#transport)
+- "Pools" (#pools)
+- "Composable verification" (#composable-verification)
+- "Generic contracts" (#generic-contracts)
+- "Presentation and desktop" (#presentation-and-desktop)
+- "AI idea agent" (#ai-idea-agent)
+- "Hyperprofile" (#hyperprofile)
+- "Cross-language parity" (#cross-language-parity)
+- "Adversarial counterexamples" (#adversarial-counterexamples)
+- "Threat model" (#threat-model)
+- "Security invariants" (#security-invariants)
+- "What is actually guaranteed" (#what-is-actually-guaranteed)
+- "What is not guaranteed" (#what-is-not-guaranteed)
+- "Testing" (#testing)
+- "Building Rust/WASM" (#building-rustwasm)
+- "Deploying" (#deploying)
+- "Whitepaper" (#whitepaper)
+- "Known limitations and open work" (#known-limitations-and-open-work)
+- "Design principles" (#design-principles)
+- "Status" (#status)
+
+---
+
+Why AIWA exists
+
+AIWA explores a simple question:
+
+«Can a useful application continue to function as a deterministic, locally materialized system while participants are disconnected for arbitrary periods, without relying on a permanently available central server?»
+
+The design treats the application as two related layers.
+
+1. History
+
+The history is an event DAG:
+
+H_d
+
+Events are content-addressed and linked to parent events.
+
+2. State
+
+Application state is a materialized function of history:
+
+A = G(H_d, θ)
+
+where:
+
+- "H_d" is the domain's event DAG;
+- "G" is the deterministic materialization function;
+- "θ" is the immutable protocol/formula parameter set.
+
+This distinction matters.
+
+A mutable state variable can silently diverge between replicas.
+
+A deterministic materialized view can instead be reconstructed from the same history.
+
+The architectural goal is therefore:
+
+events
+   ↓
+content-addressed DAG
+   ↓
+canonical topological ordering
+   ↓
+deterministic reducers
+   ↓
+materialized state
+   ↓
+UI / modules / AI
+
+The system does not assume that every peer is online simultaneously.
+
+---
+
+Security position
+
+AIWA is intentionally conservative about security claims.
+
+The project contains substantial cryptographic and adversarial testing, but:
+
+«A deterministic event DAG is not by itself a consensus protocol.»
+
+Canonical ordering makes the materialized result deterministic for a given converged event set.
+
+It does not automatically prove:
+
+- that all honest peers will receive the same events;
+- that malicious peers cannot manufacture conflicting valid events;
+- that every economic race has a semantically correct resolution;
+- that the external identity mechanism is equivalent to proof of personhood;
+- that browser sandboxing eliminates every possible resource-exhaustion or messaging attack.
+
+Those distinctions are part of the project's specification.
+
+AIWA therefore separates the status of properties into four categories:
+
+Proven / tested
+
+The implementation has an explicit test or parity check supporting the property.
+
+Conditional
+
+The property depends on an explicit assumption, injected verifier, deployment parameter, external chain, or environment.
+
+Architectural
+
+The property follows from the way the system is structured but still requires adversarial validation at larger scale.
+
+Open
+
+The project does not currently claim the property.
+
+The goal is not to hide these boundaries.
+
+The goal is to make them auditable.
+
+---
+
+Core model
+
+A domain owns an event DAG:
+
+H_d = {e_1, e_2, ..., e_n}
+
+Every event contains:
+
+- its canonical payload;
+- parent event identifiers;
+- event type;
+- relevant domain information;
+- signatures where required.
+
+Event IDs are content-addressed:
+
+eventId = SHA-256(canonical(event payload + parents))
+
+The same logical event therefore has the same identifier across implementations.
+
+Merging is set union:
+
+merge(H_a, H_b) = H_a ∪ H_b
+
+This gives the ledger an important property:
+
+merge(merge(A, B), B) = merge(A, B)
+
+Re-adding an event that is already known does not produce another event.
+
+State is then derived by canonical replay:
+
+A = G(H_d, θ)
+
+The materialization order is part of the protocol:
+
+«id-sorted depth-first topological ordering.»
+
+It is not an implementation convenience.
+
+Two implementations must use the same ordering rule or they can disagree about the result of a concurrent event set even if both are internally deterministic.
+
+---
+
+Architecture
+
+AIWA is divided into several layers.
+
+┌──────────────────────────────────────────────┐
+│                  Presentation                 │
+│        desktop / themes / UI / plugins        │
+├──────────────────────────────────────────────┤
+│                    AI layer                   │
+│       idea agent / local pattern mining      │
+├──────────────────────────────────────────────┤
+│                  Domain state                 │
+│ economics / conservation / identity / pools  │
+│              contracts / profiles             │
+├──────────────────────────────────────────────┤
+│              Deterministic reducers           │
+│                    G(H_d, θ)                  │
+├──────────────────────────────────────────────┤
+│                 Event DAG / Ledger             │
+│        content-addressed immutable events     │
+├──────────────────────────────────────────────┤
+│                  Transport                    │
+│       queue / delay tolerance / WebRTC        │
+├──────────────────────────────────────────────┤
+│             External identity layer           │
+│               Solana / future chains          │
+└──────────────────────────────────────────────┘
+
+The ledger itself has two interchangeable implementations.
+
+JavaScript reference ledger
+
+public/js/core/event-dag.js
+
+Pure JavaScript.
+
+Zero runtime dependencies.
+
+This is the currently available production implementation.
+
+Rust/WASM ledger
+
+rust-core/
+
+Rust implementation compiled to WebAssembly.
+
+The Rust implementation is intended to provide:
+
+- performance;
+- a stronger module boundary;
+- a second independent implementation;
+- cross-language parity verification.
+
+Single backend entry point
+
+public/js/core/ledger-bridge.js
+
+This is the only backend selector.
+
+It:
+
+1. loads WASM when available;
+2. falls back to JavaScript when WASM is unavailable;
+3. exposes the same logical ledger interface.
+
+Other application code should not care which implementation is active.
+
+---
+
+Repository structure
+
 AIWA/
 ├── public/
 │   ├── index.html
 │   ├── css/
-│   │   └── aiwa.css                    ← Design system (dark base, amber accent, IBM Plex, hairline borders)
+│   │   └── aiwa.css
 │   ├── data/
-│   │   └── github-trends.json          ← Daily GitHub trends feed for the idea agent
+│   │   └── github-trends.json
 │   └── js/
 │       ├── app/
-│       │   └── main.js                 ← Entry point; wires all reducers, transport, UI panels
+│       │   └── main.js
 │       └── core/
-│           ├── event-dag.js                ← Reference JS ledger; subscribe() for persistence hooks
-│           ├── event-dag-persistence.js    ← IndexedDB persistence (H_d survives tab close)
-│           ├── ledger-bridge.js            ← Backend selector (WASM or JS)
-│           ├── wasm-ledger-adapter.js      ← Translates raw wasm-bindgen surface to JS EventDag interface
-│           ├── domain-id.js                ← Deterministic domain id: SHA-256(pubkey), 64 hex chars
+│           ├── event-dag.js
+│           ├── event-dag-persistence.js
+│           ├── ledger-bridge.js
+│           ├── wasm-ledger-adapter.js
+│           ├── domain-id.js
+│           │
 │           ├── economics/
-│           │   ├── cadence.js              ← Monotonic epoch reducer; replay-protected; bounded +1
-│           │   ├── cadence-vdf.js          ← Sequential SHA-256 chain (non-parallelizable); mandatory on every cadence transition
-│           │   ├── reward.js               ← Proof-of-Will: r(b,q,q_total,T) = (b·q^α)/[ln(q_total^(β(1−T))+C)]^γ
-│           │   ├── scarcity.js             ← Preallocated-budget policy; applyIssuanceAttempt(); simulateHourlyIssuance()
-│           │   ├── g.js                    ← A = G(H_d, θ); full fold over topoOrder
-│           │   └── formula-registry-reducer.js ← Immutable formula minting; 'genesis' is the protocol default
+│           │   ├── cadence.js
+│           │   ├── cadence-vdf.js
+│           │   ├── reward.js
+│           │   ├── scarcity.js
+│           │   ├── g.js
+│           │   └── formula-registry-reducer.js
+│           │
 │           ├── conservation/
-│           │   ├── conservation.js         ← Claim state machine: Deactivate→Prove→Verify→Consume→Activate
-│           │   └── conservation-bridge.js  ← claim-issue / transfer (Ed25519-signed) / pot-release DAG events
+│           │   ├── conservation.js
+│           │   └── conservation-bridge.js
+│           │
 │           ├── identity/
-│           │   ├── identity-cost.js        ← c_id verification; identity-churn resistance (slot-scaled cost curve)
-│           │   ├── identity-cost-reducer.js← identity-register as a real DAG event; replicated by merge()
-│           │   ├── solana-networks.js      ← devnet / mainnet config; devnet default
-│           │   ├── solana-wallet.js        ← Real keypair generation; AES-256-GCM encryption; burn-tx construction+signing
-│           │   ├── solana-rpc.js           ← Real mainnet/devnet broadcast; untestable here (no network path)
-│           │   └── identity-flow.js        ← Orchestrates wallet → broadcast → verify → DAG event
+│           │   ├── identity-cost.js
+│           │   ├── identity-cost-reducer.js
+│           │   ├── solana-networks.js
+│           │   ├── solana-wallet.js
+│           │   ├── solana-rpc.js
+│           │   └── identity-flow.js
+│           │
 │           ├── modules/
-│           │   ├── module-hash.js          ← Content-addressing: SHA-256 of module code
-│           │   ├── module-registry.js      ← Open registration; economic self-declaration; audit status reset on code change
-│           │   ├── module-registry-reducer.js ← Registry as a materialized view over H_d; propagates via merge()
-│           │   ├── module-rank.js          ← Sort key (r(b,q) of author's burn+epoch); submission eligibility (ratio check); rankFromIdentityAndCadence()
-│           │   ├── module-submission.js    ← Signed pipeline: real Ed25519 (@noble/curves); replay-guarded nonces; hash-checked against fetched code; author-only updates
-│           │   ├── module-fetch.js         ← Real fetch(codeUrl) + submission; untestable here
-│           │   ├── module-loader.js        ← Fetch + hash-verify before mounting (not before submitting)
-│           │   └── module-sandbox.js       ← Real <iframe sandbox="allow-scripts"> without allow-same-origin;
-│           │                                  ctx bridged over postMessage; theme injected as CSS vars + ctx.theme JSON;
-│           │                                  hash-mismatch blocks mounting; close button unmounts cleanly
+│           │   ├── module-hash.js
+│           │   ├── module-registry.js
+│           │   ├── module-registry-reducer.js
+│           │   ├── module-rank.js
+│           │   ├── module-submission.js
+│           │   ├── module-fetch.js
+│           │   ├── module-loader.js
+│           │   └── module-sandbox.js
+│           │
 │           ├── transport/
-│           │   ├── transport.js                ← Interface definition; assertImplementsTransport() makes partial implementations fail loudly
-│           │   ├── delay-tolerant-transport.js ← Durable queue-then-attempt; FIFO per peer; stops at first failure; no reordering
-│           │   └── connection-watchdog.js      ← Fires stale callback exactly once per episode; resets on reconnect
+│           │   ├── transport.js
+│           │   ├── delay-tolerant-transport.js
+│           │   └── connection-watchdog.js
+│           │
 │           ├── pool/
-│           │   └── pool-reducer.js         ← General pooling primitive: pool-init / pool-contribute / pot-release;
-│           │                                  pot address has no keypair; verifyPoolPayout uses causal-condition-evaluator
+│           │   └── pool-reducer.js
+│           │
 │           ├── contracts/
-│           │   └── generic-contract-reducer.js ← Composable declarative contracts; condition fixed permanently at mint time;
-│           │                                      release event supplies only claimId/from/to/contractId; cannot smuggle a condition
+│           │   └── generic-contract-reducer.js
+│           │
 │           ├── verification/
-│           │   └── causal-condition-evaluator.js ← Six primitives: ownership / signature / count / deterministic-match / unique / causal-order;
-│           │                                        composed as AND/OR/NOT declarative data; never executes submitted code
+│           │   └── causal-condition-evaluator.js
+│           │
 │           ├── presentation/
-│           │   └── theme-tokens.js         ← Two presets: default / compact (monospace, max contrast, for bandwidth-constrained nodes);
-│           │                                  both declare identical token key sets; themeToCssVariables() produces real :root{} block
+│           │   └── theme-tokens.js
+│           │
 │           ├── desktop/
-│           │   └── desktop-layout.js       ← Pure DOM-free logic: reorder / fold two icons into folder / merge into existing /
-│           │                                  eject / remove; rank computed + displayed but does not control layout order;
-│           │                                  storage migration from flat pin lists is transparent
+│           │   └── desktop-layout.js
+│           │
 │           └── ai/
-│               ├── idea-agent.js           ← Context builder: real desktop pins, published module data, recency-weighted category
-│               │                              trends, category gaps, multi-contact overlap (2+ distinct contacts required);
-│               │                              prompt constructor; reply sanitizer; never writes to consensus
-│               ├── webllm-engine.js        ← Real WebGPU / dedicated Worker / @mlc-ai/web-llm streaming; untestable here
-│               ├── module-pattern-miner.js ← Mines real ctx primitive usage across local registry (loadVerifiedModuleCode);
-│               │                              reports which primitives are never used by any module
-│               └── public-profile-reducer.js ← Hyperprofile: DAG-replicated key/value; latest-write-wins; null retracts
+│               ├── idea-agent.js
+│               ├── webllm-engine.js
+│               ├── module-pattern-miner.js
+│               └── public-profile-reducer.js
+│
 ├── rust-core/
 │   ├── src/
-│   │   ├── core.rs / dag.rs / event.rs / lib.rs
-│   │   ├── economics/      ← cadence, cadence_vdf, reward, scarcity, g, formula_registry_reducer
-│   │   ├── conservation/   ← conservation (mod.rs), conservation_bridge
-│   │   ├── identity/       ← identity-cost + identity_cost_reducer (full mirror incl. churn resistance)
-│   │   ├── modules/        ← module_hash, module_registry, module_registry_reducer, module_rank, module_submission
-│   │   ├── pool/           ← pool_reducer
-│   │   ├── contracts/      ← generic_contract_reducer (with hand-written parse_condition — no serde derive for Condition enum)
-│   │   ├── verification/   ← causal_condition_evaluator
-│   │   └── ai/             ← public_profile_reducer
-│   ├── examples/           ← check_id_parity, check_g_parity, check_conservation_parity,
-│   │                          sign_submission_rust, verify_submission_from_js
-│   └── tests/              ← g_scenario, counterexample_wallclock, conservation_scenario,
-│                              counterexample_nonatomic_consume, pool_parity (cross-language draw hash)
-├── tests/                  ← 415 JS tests
-├── test-vectors/           ← id-parity.json / g-scenario.json / conservation-scenario.json
+│   │   ├── core.rs
+│   │   ├── dag.rs
+│   │   ├── event.rs
+│   │   ├── lib.rs
+│   │   ├── economics/
+│   │   ├── conservation/
+│   │   ├── identity/
+│   │   ├── modules/
+│   │   ├── pool/
+│   │   ├── contracts/
+│   │   ├── verification/
+│   │   └── ai/
+│   ├── examples/
+│   │   ├── check_id_parity
+│   │   ├── check_g_parity
+│   │   ├── check_conservation_parity
+│   │   ├── sign_submission_rust
+│   │   └── verify_submission_from_js
+│   └── tests/
+│
+├── tests/
+│
+├── test-vectors/
+│   ├── id-parity.json
+│   ├── g-scenario.json
+│   └── conservation-scenario.json
+│
 ├── scripts/
 │   ├── verify-parity.sh
 │   ├── verify-g-parity.sh
 │   ├── verify-conservation-parity.sh
-│   ├── verify-submission-parity.sh    ← Both directions: JS signs → Rust verifies; Rust signs → JS verifies
+│   ├── verify-submission-parity.sh
 │   └── fetch-github-trends.mjs
+│
 ├── examples/
-│   └── jackpot-plugin/jackpot.js      ← Real example plugin: jackpot funded and paid in AIWA
+│   └── jackpot-plugin/
+│       └── jackpot.js
+│
 ├── docs/
 │   └── AIWA_whitepaper_v1_2_revised.md
-├── package.json            ← Test-only devDependencies (@solana/web3.js, @noble/curves); app itself uses CDN
-└── .github/workflows/
-    ├── ci.yml                     ← Rust tests + all parity scripts + WASM build + auto-commit of binary
-    ├── deploy-pages.yml           ← Deploys public/ to GitHub Pages on push to main
-    └── update-github-trends.yml   ← Daily: GitHub search API → public/data/github-trends.json
-```
+│
+├── package.json
+│
+└── .github/
+    └── workflows/
+        ├── ci.yml
+        ├── deploy-pages.yml
+        └── update-github-trends.yml
 
 ---
 
-## Layers
+Ledger — Event DAG
 
-### Ledger — event DAG (H_d)
+The ledger is a content-addressed DAG of events.
 
-`event-dag.js` is a content-addressed DAG of events. Each event's id is SHA-256 of its canonicalized (key-sorted) payload and parent ids. `merge()` is a set union — idempotent, order-independent. `topoOrder()` sorts events id-first depth-first; this tie-breaking rule is part of the protocol contract, not an implementation detail (two implementations can each be internally deterministic while disagreeing on concurrent branches if they pick different tie-breaking rules).
+Each event ID is derived from:
 
-`subscribe()` notifies listeners when genuinely new events are added via `addEvent()` or `merge()`. Re-adding an already-known event does not fire.
+SHA-256(
+    canonicalized event payload
+    + canonicalized parent identifiers
+)
 
-**Persistence**: `event-dag-persistence.js` uses IndexedDB. H_d survives tab close and page reload. `topologicalSortForReplay()` is extracted as pure logic and tested: its output is confirmed replayable through a real EventDag without hitting unknown-parent rejections. `restoreTipsFromDag()` recovers the domain's real cadence tip after restore, so a post-restore cadence advance correctly chains from the last known epoch rather than from genesis.
+Object keys are recursively canonicalized before hashing.
 
-**Domain identity**: a domain id is `SHA-256(publicKey)` truncated to 64 hex characters (256 bits). `shortDomainLabel()` truncates for display only. The full id is used inside every signature verification path.
+This is required because:
 
-**JS/Rust id parity**: `JSON.stringify` preserves key insertion order; `serde_json` sorts keys alphabetically. The JS side recursively canonicalizes (sorts) object keys before hashing, matching Rust. Verified by `scripts/verify-parity.sh` over `test-vectors/id-parity.json` (flat payloads, nested payloads, arrays, unsorted parents, different key orders for the same logical object). 6/6 vectors match. Runs in CI on every push.
+JSON.stringify(...)
 
----
+and Rust's JSON serialization do not automatically guarantee identical key ordering.
 
-### Economics — G(H_d, θ)
+The JavaScript implementation therefore sorts object keys recursively so that the result matches the Rust implementation.
 
-`A = G(H_d, θ)` is a fold over a topologically-ordered event list. Three event types:
+The parity suite includes:
 
-- `genesis` — initializes a domain
-- `cadence` — advances q_d (monotonic, replay-protected, bounded +1, must carry a VDF proof)
-- `accrual` — carries `{domain, b, q0}`; derives q from cadence state as folded so far; computes reward; hands the clamped issued amount to the scarcity reducer
+- flat payloads;
+- nested payloads;
+- arrays;
+- unsorted parents;
+- different logical key insertion orders.
 
-**Reward formula** (Proof-of-Will, adapted from YourMine's `calcClaimable()`):
+The current test vector contains six ID-parity cases.
 
-```
-r(b, q, q_total, T) = (b · q^α) / [ln(q_total^(β(1−T)) + C)]^γ
-```
-
-Reference constants: α=1.1, β=2.2, γ=3, C=35937. Verified byte-for-byte JS and Rust: `r(1, 100, 100, 0) = 0.11844290947765648`, confirmed three ways (direct call, full cadence replay through real EventDag, cross-language parity script).
-
-`q_total` is the domain's own cadence epoch count — not a shared global chain height, which would reintroduce cross-domain synchrony. The minimum-slot wait from the original formula becomes `minQ`, a deployment-chosen epoch count.
-
-**Scarcity**: `applyIssuanceAttempt()` clamps reward to remaining per-domain budget (or unclamped for the unbounded control case). `simulateHourlyIssuance()` reproduces the whitepaper's simulation loop. Verified against the paper's own worked numbers: I(1000h)=2000, I(10000h)=20000 unbounded; saturates at 10000 under a 5000+5000 preallocated budget.
-
-**Cadence VDF**: every cadence transition must carry a sequential SHA-256 chain: `h_i = SHA-256(h_{i-1})`, seeded from the domain and the prior epoch's real VDF output. Epoch N's proof cannot start without epoch N-1's real result. Verification means recomputing the chain. Iteration count is configurable in the Parameters screen (default 200,000 ≈ 240ms on typical hardware). Not a true asymmetric VDF — verification costs what computation costs. Difficulty is hardware-relative. Closes the ability to post thousands of structurally-valid cadence transitions within milliseconds of real time.
-
-**Formula registry**: `formula-registry-reducer.js` makes reward parameters immutable once registered. A `formula-register` event mints an id permanently bound to fixed `(alpha, beta, gamma, C, minQ)` — no update path, ever. The same id cannot be re-minted with different parameters. `'genesis'` is the fixed protocol default, needing no event or burn (avoids a bootstrapping paradox). Which formula a domain currently uses is a separate, local, non-permanent choice from whether that formula exists. Two domains using silently different θ would materialize different balances from the same accrual event — this closes that fork risk.
-
-**Sybil analysis**: capital-splitting is exactly reward-neutral before identity cost under the current formula's linear b-term — any c_id > 0 makes N*=1 optimal unconditionally. Identity churn (abandoning an aging domain for a fresh one to dodge the age-decay term) is confirmed to pay near genesis but reaches a crossover within a handful of simulated rounds as deployment matures. Damped by the slot-scaled identity cost curve (off by default).
+All six match.
 
 ---
 
-### Conservation — claim state machine
+Merge semantics
 
-Conservation moves or converts an *existing* claim. It never creates value; that is G's job. The five pipeline steps (`Deactivate → Prove → Verify → Consume → Activate`) are individually callable functions, not a black-box orchestrator.
+"merge()" is set union.
 
-A transfer is a transmutation whose derivation function is `identityDerivation`. The load-bearing invariant — `count(Consume(p)) ≤ 1` — is a direct port of the whitepaper's reference pseudocode.
+Adding an already-known event has no effect.
 
-**Wired to economics via `conservation-bridge.js`**:
+This gives the event set a natural idempotence property.
 
-- `claim-issue`: debits a domain's real G-balance (checks against G's rejected event id set; cannot issue more than was accrued), creates a spendable claim
-- `transfer`: runs the full Deactivate→Prove→Verify→Consume→Activate pipeline; requires a real Ed25519 signature over `(claimId, from, to, nonce, timestamp)` verified against `signerPubkey`; further checks that `SHA-256(signerPubkey) == from` (proof of control, not a declared label); nonce replay guard
-- `pot-release`: accepted without a signature only when an injected verifier (supplied by the caller, never hardcoded) confirms the release matches what the deterministic contract says it should be
+"subscribe()" only fires for genuinely new events:
 
-A plain string ownership check (`claim.owner == from`) would allow any reconciled peer to forge a transfer. Confirmed rejected in tests: a real attacker keypair signing a transfer from someone else's domain id is blocked; victim's claim is untouched.
-
----
-
-### Identity — c_id
-
-**Mechanism**: before partition (while still connected), a domain burns real SOL to the Solana incinerator address (`1nc1nerator11111111111111111111111111111111`). The transaction signature becomes that domain's c_id proof. The cost is sunk instantly — no enforcement dependency during arbitrarily long partition, unlike bonded staking where slashing must be enforced after misbehavior is detected.
-
-The verified burn is recorded as an `identity-register` DAG event, folded and propagated by `merge()`. Two domains that reconcile will learn each other's registered identities. Identity state was formerly a standalone variable that lived only in the registering domain's memory and was never replicated.
-
-**Identity-churn resistance**: the burn required for a NEW registration scales monotonically with the real Solana slot number at which the burn was confirmed (configurable cost curve, off by default). The slot is already present in `getTransaction()`'s response — no new RPC call needed. This dampens the attack where a domain abandons an aging identity to dodge the reward formula's age-decay term. Does not distinguish an attacker from a legitimate late joiner; the tradeoff is stated, not decided.
-
-**Files**:
-
-- `identity-cost.js` / `mod.rs` — pure verification and registration logic; chain-agnostic (`NormalizedBurnTx` shape)
-- `solana-wallet.js` — real keypair (Ed25519), AES-256-GCM password encryption via Web Crypto, burn-tx construction and signing; tested against the real `@solana/web3.js`; a real signature is verified by round-tripping through the library's own deserializer
-- `solana-rpc.js` — real `fetch()` to a real Solana endpoint; has never been exercised here (no network path); confirmed real code, not a stub
-- `identity-flow.js` — orchestrates wallet → broadcast → verify → `identity-register` event; no longer touches any local identity state
-
-Adding a second chain: write a new `xxx-wallet.js` / `xxx-rpc.js` pair that produces the same `NormalizedBurnTx` shape. No change to `identity-cost.js`.
-
-**UI**: wallet creation/unlock (encrypted, persisted to `localStorage`; plaintext secret key never touches storage); devnet/mainnet selector (devnet default, with explicit warning that free faucet SOL provides no real Sybil resistance); burn-to-register button behind a confirmation dialog naming the exact amount, network, and irreversibility. `Commit` and `Claim reward` are DOM-`disabled` until `hasIdentityCost(domain)` is true.
+- "addEvent()" with a new event → notification;
+- "merge()" containing new events → notification;
+- re-adding known events → no notification.
 
 ---
 
-### Modules
+Persistence
 
-Registration is open — no allow-list, no approval step. The only mechanical rejections are: duplicate id, or an internally inconsistent economic declaration for an issuing module (validated against the real reward formula). Audit is future AI work.
+"event-dag-persistence.js" persists the DAG in IndexedDB.
 
-**Content addressing** (`module-hash.js`): every registration binds an id to a SHA-256 hash, not a mutable URL. A verdict stays attached to the exact bytes it was made about. `updateModuleCode()` resets audit status to `unaudited` on every code change. An update to an existing module id is rejected unless the signer matches the module's recorded author.
+The goal is that:
 
-**Registry** (`module-registry.js`): `registerModule()`, `updateModuleCode()`, `auditModule()`. For an issuing module, validates the economic self-declaration against the real `reward.js` math. `identityScheme` is derived from the declaration: strong / weak / non-issuing (Lemma 1 reasoning attached as a labeled badge in the UI, not a bare label).
+browser closes
+      ↓
+browser reopens
+      ↓
+H_d restored
+      ↓
+materialized state reconstructed
 
-**DAG replication** (`module-registry-reducer.js`): `module-register` / `module-update` / `module-audit` are DAG event types. The registry is a materialized view over H_d, propagated for free by `merge()`/`topoOrder()`. A module registered on one domain propagates to all reconciled peers.
+The persistence layer does not treat the materialized state as authoritative.
 
-**Rank** (`module-rank.js`): list sort key = `r(burnedLamports, elapsedEpochs, θ)` of the author's real identity-cost and cadence state. Submission eligibility = a ratio-must-not-decline check (modeled on real `checkScoreEligibility`). `rankFromIdentityAndCadence()` composes both from real materialized state. Rank is displayed in the Domain catalog but does not control desktop layout order.
+The DAG remains the source of truth.
 
-**Signed submission** (`module-submission.js`): builds a signed submission event (`moduleId`, `codeHash`, `codeUrl`, `nonce`, `timestamp`, `signature`); checks against actually-fetched code (not the caller's claim); replay-guards nonces; only then calls `registerModule()` or `updateModuleCode()`. Tested with real Ed25519 signing via `@noble/curves`. No economic gate on publishing — signing is for attribution and integrity only.
+Replay ordering is implemented separately as pure logic:
 
-Cross-language submission parity: `scripts/verify-submission-parity.sh` confirms both directions (JS signs → Rust verifies; Rust signs → JS verifies) with real freshly-generated keypairs each run.
+topologicalSortForReplay()
 
-**Sandbox** (`module-sandbox.js`): module code runs inside `<iframe sandbox="allow-scripts">` *without* `allow-same-origin`. Isolation is a property of where the code executes, not a rule the code is asked to follow. A module whose fetched code doesn't match its registered hash is refused mounting outright. The `ctx` surface is bridged over `postMessage`, invisible to the module author.
+The restore path verifies that its output can be replayed through a real "EventDag" without violating unknown-parent constraints.
 
-**ctx surface available to modules**:
-- `ctx.storage.get(key)` / `ctx.storage.set(key, value)` — durable, scoped to `(domain, moduleId)`
-- `ctx.toast(message)` — logged to the real event log
-- `ctx.commit(b)` — stakes a claim at the current cadence epoch
-- `ctx.claim()` — claims reward for elapsed epochs
-- `ctx.postCausalEvent(type, payload)` — generic DAG write; host forces the real caller's domain id onto every event
-- `ctx.queryCausalState(contractId)` — generic DAG read
-- `ctx.share(key, value)` — DAG-replicated key/value (hyperprofile); `null` retracts
-- `ctx.sendToPeer(domainId, message)` — real-time via the real transport layer; delivered only if the target module is currently mounted on the receiving domain
-- `ctx.onPeerMessage(handler)` — receives real-time messages addressed to this module
-- `ctx.theme` — active theme as real, parseable JSON (identical token values as the CSS vars injected in the `<style>` tag)
+"restoreTipsFromDag()" then reconstructs the domain's actual cadence tip.
 
-**Theme injection**: `module-sandbox.js`'s `buildSandboxHtml()` injects the active theme both as CSS custom properties and as `ctx.theme`. Module code is confirmed byte-identical across both presets — only the injected presentation differs.
-
-**`module-loader.js`**: fetches and hash-verifies a module's real code before mounting. A code swap behind the same URL is detected and rejected.
+This matters because simply restoring a cached tip could cause a new cadence event to accidentally chain from stale local state.
 
 ---
 
-### Transport
+Domain identity
 
-`transport.js` defines the interface. `assertImplementsTransport()` makes partial backends fail loudly, naming exactly which method is missing.
+A domain identifier is derived from its public key:
 
-`delay-tolerant-transport.js`: a message is durably queued before any network attempt. `flush()` preserves FIFO order per peer and stops at the first failure. Different peers' queues are independent. An already-delivered message is removed from the queue on success (not left as "queued").
+domainId = SHA-256(publicKey)
 
-`connection-watchdog.js`: fires its stale callback exactly once per episode (verified with an injected clock). Correctly resets on real reconnect. Resolves the boundary case — activity exactly at the timeout — explicitly.
+The resulting identifier is represented as 64 hexadecimal characters.
 
-The app's Reconcile action goes through `transport.send()`, not `dag.merge()` directly. Delivery is simulated within one browser tab (real `dag.merge()` when link is up; real queueing when down). A per-contact link up/down toggle, live queue-depth stat, and flush button are in the UI.
+The full identifier is used for cryptographic verification.
 
-WebRTC mesh backend: honest, explicit stub. Real signaling infrastructure is not available in this environment; a fabricated never-connected implementation was deliberately not shipped.
+Short labels are presentation-only.
 
----
+A display helper such as:
 
-### Pool and composable contracts
+shortDomainLabel()
 
-**Pool** (`pool-reducer.js` / `pool_reducer.rs`):
+must never replace the complete domain ID inside a signature or ownership check.
 
-- `pool-init`: mints a pot address with no keypair (by design — no party moves money on anyone else's behalf)
-- `pool-contribute`: records real signed claims
-- `pot-release`: `verifyPoolPayout` uses `causal-condition-evaluator` rather than hand-written security checks
-
-Cross-language draw parity: `(poolId, cycleIndex, contributions)` run through both languages' `computeWeightedDraw` produce identical `winnerDomain`, `totalAmount`, and full 64-character `drawHash`. Pinned as a permanent regression test.
-
-**Composable verification** (`causal-condition-evaluator.js` / `causal_condition_evaluator.rs`):
-
-Six primitives — `ownership` / `signature` / `count` / `deterministic-match` / `unique` / `causal-order` — composed as AND/OR/NOT declarative data. The evaluator never executes submitted code. Every primitive generalizes a check some already-shipped reducer already performed by hand.
-
-`pool-reducer.js`'s `verifyPoolPayout` was rewritten to use the evaluator. The existing 25 pool tests passed unchanged against the rewritten implementation — confirmed drop-in replacement.
-
-**Generic contracts** (`generic-contract-reducer.js` / `generic_contract_reducer.rs`):
-
-A third party can define a new contract without touching platform code. The verification condition is supplied once, at mint time, and is fixed permanently (same discipline as formula-register). A release event supplies only `claimId` / `from` / `to` / `contractId` — the condition is substituted from the already-fixed mint record. A release event cannot supply its own condition. Confirmed: an attacker smuggling an extra `condition` field into a release attempt is completely ignored; the real minted condition (chosen to be unambiguously false in the test) is the one evaluated.
-
-Demo: a real 2-of-2 threshold-release escrow — sharing zero code with `pool-reducer.js` — built as one `count` condition over real approval events.
-
-Rust note: `generic_contract_reducer.rs` requires a hand-written `parse_condition` since the `Condition` enum has no direct serde derive for its shape.
-
-**Example plugin**: `examples/jackpot-plugin/jackpot.js` — a jackpot funded and paid entirely in AIWA. The pool-address string prefix (`jackpot-pot:<poolId>`) is deliberately kept unchanged in the rename from `jackpot-reducer` to `pool-reducer` — renaming code around something already live in H_d must never retroactively change what's already there.
+This prevents a class of bugs where a truncated visual identifier accidentally becomes a security identifier.
 
 ---
 
-### Presentation and desktop
+Materialization — "A = G(H_d, θ)"
 
-**Themes** (`theme-tokens.js`): `default` and `compact` (large monospace, maximum contrast, secondary text collapsed to same value as primary — for bandwidth- or hardware-constrained nodes). Both presets declare identical token key sets. `themeToCssVariables()` produces a real `:root {}` CSS block, confirmed to differ between presets. A Presentation selector in Parameters switches `activeThemeId` — confirmed to have exactly one side effect (reassigning that variable), touching no other state.
+The authoritative application state is produced by folding the event DAG:
 
-**Desktop** (`desktop-layout.js`): pure, DOM-free logic. Rules: reorder, fold two icons into a folder, merge into an existing folder, eject (explicit tap, not a drag back out), remove. Rank is computed and displayed but does not control layout order — a render that re-sorted by computed rank would silently discard drag arrangements on every state refresh. Storage migrates transparently from flat pin lists; corrupted data degrades to empty rather than crashing.
+A = G(H_d, θ)
 
-**Design system** (`css/aiwa.css`): dark base (#0B0D10), amber accent (#E3A008), green/red reserved strictly for semantic proof-status states. IBM Plex Mono for headers, IBM Plex Sans for body. Hairline 1px borders, near-zero border-radius, zero shadows, zero gradients. Status indicators reuse the whitepaper's own Proved/Tested/Conditional/Open vocabulary as a real UI primitive. Left sidebar above 900px; responsive multi-column card grid; plugin runner as a bounded floating panel.
+The current economics implementation recognizes three primary event types:
 
----
+genesis
+cadence
+accrual
 
-### AI idea agent
+"genesis"
 
-`idea-agent.js` builds a context snapshot from:
+Initializes a domain.
 
-- Real desktop pins and the domain's own published hyperprofile data (usage over registration)
-- Recency-weighted trending categories across the network: only the most recently registered third of the network, so 3 new modules in one category outweigh months of stale accumulation
-- Category gaps — categories that exist in the network but not in this domain's own modules
-- Multi-contact overlap — categories where 2+ genuinely distinct contacts have registered modules (one contact with two modules in the same category does NOT count)
-- GitHub repository trends (`public/data/github-trends.json`), labeled "NOT this AIWA network, for inspiration only" in the prompt; never leaks into fields that mean real AIWA network activity; freshness stated honestly (may be stale)
-- `module-pattern-miner.js` — mines which `ctx` primitives (`storage`, `postCausalEvent`, `share`, `sendToPeer`, etc.) are actually used across locally-known modules (via `loadVerifiedModuleCode`); reports primitives never used by any module as concrete "nobody's tried this yet" hooks
+"cadence"
 
-The agent produces text suggestions only. No code generation. No consensus writes. No authoritative protocol role.
+Advances the domain's monotonic epoch state.
 
-`webllm-engine.js`: real WebGPU detection, real dedicated Worker, real streaming chat via `@mlc-ai/web-llm`. Untestable here (no browser).
+"accrual"
 
-**GitHub trends bot** (`scripts/fetch-github-trends.mjs` + `update-github-trends.yml`): uses GitHub's official public search API (`GET /search/repositories`). Scheduled daily Action, commits result to `public/data/github-trends.json`. The app fetches this file once, lazily, cached — never awaited inside a render function. `ci.yml`'s `paths-ignore` excludes the bot's daily commit from triggering a full CI run.
+Computes a reward using the cadence state that exists at the point where the event is folded.
 
-**Pattern miner** (`module-pattern-miner.js`): bounded to 20 modules; uses the same hash-verifying fetch as `mountModule()`; cached and non-blocking. Confirmed: the rendered prompt never contains a code skeleton or the word "skeleton".
+The materializer therefore does not use:
 
----
+- wall-clock time;
+- the time at which a browser happens to replay the event;
+- the current global network height.
 
-### Hyperprofile
-
-`public-profile-reducer.js` / `public_profile_reducer.rs`: a DAG-replicated key/value store. `ctx.share(key, value)` publishes; `value: null` retracts. Latest-write-wins. A Contacts screen "Visit profile" button shows what a domain's modules have genuinely published, materialized the same way as every other view.
-
-`ctx.sendToPeer(domainId, message)` / `ctx.onPeerMessage(handler)`: real-time, routed through the real transport layer. Delivered only if the target module is currently mounted on the receiving domain. No inbound queue. A real-time module message does not trigger a DAG merge (branched on the message's declared type before deciding what delivery means).
+The state must come from the event history.
 
 ---
 
-## Cross-language parity
+Economics
 
-Every layer has a parity check. All run in CI on every push.
+AIWA's economics layer is derived from the reward model inherited and adapted from YourMine.
 
-| Layer | Script | Vectors / method |
-|---|---|---|
-| Ledger event ids | `scripts/verify-parity.sh` | `test-vectors/id-parity.json` |
-| Composed G | `scripts/verify-g-parity.sh` | `test-vectors/g-scenario.json` |
-| Conservation | `scripts/verify-conservation-parity.sh` | `test-vectors/conservation-scenario.json` |
-| Module submission signing | `scripts/verify-submission-parity.sh` | Live keypairs, both directions, each run |
-| Pool weighted draw | pinned regression test | `rust-core/tests/pool_parity.rs` |
+The current implementation uses:
 
-**Materialization order** is part of the protocol contract: id-sorted depth-first topological order. Two implementations can each satisfy "G is a deterministic function of the converged event set" while disagreeing with each other if they pick different (both valid) tie-breaking rules for concurrent branches.
+r(b, q, q_total, T)
+=
+(b · q^α)
+/
+[ln(q_total^(β(1−T)) + C)]^γ
 
-**Numeric/float semantics**, **protocol versioning**, and elevation of test vectors to a formal conformance suite are named open items in the whitepaper's consensus contract section.
+Reference constants:
+
+α = 1.1
+β = 2.2
+γ = 3
+C = 35937
+
+A reference evaluation is:
+
+r(1, 100, 100, 0)
+=
+0.11844290947765648
+
+This value is confirmed through:
+
+1. direct JavaScript evaluation;
+2. full cadence replay through a real "EventDag";
+3. cross-language JS/Rust parity.
 
 ---
 
-## Deliberately-broken counterexamples
+Cadence
 
-These files are kept permanently out of the production source directories and are never exported as usable code.
+Cadence is a domain-local monotonic epoch counter.
 
-- `tests/counterexample-wallclock.test.mjs` / `rust-core/tests/counterexample_wallclock.rs` — a G that derives q from an injected wall clock instead of cadence state materializes the same event set to a 100x-different balance depending solely on when it's computed
-- `tests/counterexample-nonatomic-consume.test.mjs` / `rust-core/tests/counterexample_nonatomic_consume.rs` — splitting the atomic `consume()` into two steps lets two branches both pass the check before either commits, minting two destination claims from one proof (the double-spend)
-- `tests/lemma1.test.mjs` — a weak identifier that omits q collides two events with different reward under cadence-sensitive β; confirmed safe when β=0
+It is intentionally not derived from a global chain height.
+
+Every domain has its own cadence:
+
+q_d
+
+This prevents the economics layer from requiring every domain to remain synchronized with a shared global clock.
+
+Cadence transitions are:
+
+- monotonic;
+- replay-protected;
+- bounded to "+1";
+- required to contain a cadence VDF proof.
+
+The deployment may define a minimum number of epochs required before a claim becomes eligible.
+
+The original minimum-slot concept is represented as:
+
+minQ
 
 ---
 
-## Running tests
+Cadence and VDF
 
-```bash
-# JS
-npm install   # only needed for @solana/web3.js and @noble/curves tests
+Every cadence transition must contain a sequential SHA-256 proof.
+
+The construction is:
+
+h_i = SHA-256(h_{i-1})
+
+The seed incorporates:
+
+- the domain;
+- the previous epoch;
+- the previous real VDF output.
+
+Therefore epoch "N" cannot simply invent an independent proof without first knowing the result of epoch "N-1".
+
+The implementation verifies the chain by recomputing it.
+
+The default iteration count is:
+
+200,000
+
+This is approximately 240 ms on typical hardware, but the actual cost is hardware-dependent.
+
+Important limitation
+
+This is not a traditional asymmetric VDF.
+
+Verification costs essentially the same sequential work as generation.
+
+The project does not claim otherwise.
+
+The current construction is best understood as a computational rate-limiting mechanism intended to make the production of large numbers of structurally valid cadence transitions expensive in wall-clock computation time.
+
+It does not provide:
+
+- hardware-independent elapsed-time measurement;
+- asymmetric proof verification;
+- perfect resistance to high-performance hardware;
+- a proof that computation corresponds to real-world time.
+
+The iteration count is configurable in the Parameters UI.
+
+A more rigorous quantitative analysis of attacker throughput remains future work.
+
+---
+
+Reward function
+
+The reward function is exposed in:
+
+public/js/core/economics/reward.js
+
+and mirrored in:
+
+rust-core/src/economics/reward/
+
+The implementation intentionally keeps the mathematical function separate from:
+
+- cadence;
+- scarcity;
+- identity cost;
+- conservation;
+- UI.
+
+This makes it possible to test the formula independently and to bind it to immutable formula identifiers.
+
+---
+
+Scarcity
+
+"scarcity.js" implements a preallocated-budget policy.
+
+The central operation is:
+
+applyIssuanceAttempt()
+
+which clamps an otherwise valid reward to the remaining issuance budget.
+
+The simulation helper:
+
+simulateHourlyIssuance()
+
+reproduces the paper's issuance scenarios.
+
+The current implementation has been checked against the whitepaper's worked numbers:
+
+I(1000h)  = 2000
+I(10000h) = 20000
+
+for the unbounded control case.
+
+Under a:
+
+5000 + 5000
+
+preallocated budget, issuance saturates at:
+
+10000
+
+Conservation and issuance remain separate:
+
+G → creates value
+Conservation → moves/converts existing value
+
+---
+
+Formula registry
+
+Reward parameters cannot silently change once registered.
+
+A:
+
+formula-register
+
+event permanently binds a formula ID to:
+
+(alpha, beta, gamma, C, minQ)
+
+There is intentionally no update operation.
+
+Reusing the same formula ID with different parameters is rejected.
+
+The protocol's default:
+
+genesis
+
+formula is fixed and does not require a registration event or identity burn.
+
+This avoids a bootstrapping paradox in which the protocol would need a formula-registration event before it could even know how to evaluate that event.
+
+A domain's choice of currently active formula is separate from formula existence.
+
+This distinction is important:
+
+formula exists
+≠
+domain currently uses formula
+
+Without this separation, two domains could silently interpret the same accrual event under different parameter sets.
+
+---
+
+Sybil and identity economics
+
+The current reward formula contains a linear "b" term.
+
+Before identity cost, splitting a fixed amount of capital across multiple identities is therefore reward-neutral.
+
+Under a positive identity cost:
+
+c_id > 0
+
+the current analysis finds:
+
+N* = 1
+
+as the optimal number of identities for capital splitting.
+
+Identity churn is a separate attack.
+
+An attacker might abandon an aging domain and create a new one to avoid the age-decay component of the reward function.
+
+The implementation models this and finds that the fresh identity can be advantageous near genesis, but that the crossover occurs within a small number of simulated rounds as the deployment matures.
+
+The identity-cost curve can therefore scale the cost of new registrations with chain slot.
+
+This mitigation is:
+
+- configurable;
+- off by default;
+- a damping mechanism rather than a proof that identity churn is impossible.
+
+It also does not distinguish a legitimate late joiner from an attacker.
+
+That tradeoff is intentional and documented.
+
+---
+
+Conservation
+
+The conservation layer manages value that already exists.
+
+It does not mint new value.
+
+Its state machine is:
+
+Deactivate
+    ↓
+Prove
+    ↓
+Verify
+    ↓
+Consume
+    ↓
+Activate
+
+These are individually callable operations rather than a single opaque operation.
+
+The key conservation invariant is:
+
+count(Consume(p)) ≤ 1
+
+This prevents one proof from being consumed twice.
+
+A transfer is represented as a transmutation whose derivation function is:
+
+identityDerivation
+
+---
+
+Conservation bridge
+
+"conservation-bridge.js" connects conservation to economics.
+
+"claim-issue"
+
+A claim can only be issued from an actual balance produced by "G".
+
+The bridge:
+
+- checks the materialized economics state;
+- checks rejected event IDs;
+- prevents issuing more than has actually accrued;
+- creates the spendable claim.
+
+"transfer"
+
+A transfer requires:
+
+- the full conservation pipeline;
+- a real Ed25519 signature;
+- the claim ID;
+- source domain;
+- destination domain;
+- nonce;
+- timestamp.
+
+The signature is verified against the supplied public key.
+
+The system then checks:
+
+SHA-256(signerPubkey) == from
+
+This prevents a peer from simply declaring:
+
+from = victimDomain
+
+while signing with an unrelated attacker key.
+
+A replay guard prevents reuse of the same nonce.
+
+An explicit attacker-key test confirms that attempting to transfer another domain's claim is rejected and leaves the victim's claim unchanged.
+
+---
+
+Pot release
+
+"pot-release" is different.
+
+It does not accept an arbitrary caller signature as sufficient authorization.
+
+Instead, the caller supplies a verifier.
+
+The release is accepted only if the injected verifier confirms that the release corresponds to the deterministic contract condition.
+
+The verifier is injected rather than hard-coded so that the contract layer remains composable.
+
+---
+
+Identity and "c_id"
+
+AIWA uses an explicit identity cost.
+
+The current implementation uses Solana.
+
+Before partition, while connectivity is available, a domain can burn SOL to the Solana incinerator address.
+
+The transaction signature becomes the domain's identity-cost proof.
+
+The economic idea is:
+
+identity registration
+        ↓
+irreversible external cost
+        ↓
+identity-register event
+        ↓
+replicated through H_d
+
+The cost is sunk immediately.
+
+This is deliberately different from a bonded stake model that would require enforcement during an arbitrarily long network partition.
+
+---
+
+Identity registration
+
+The identity layer is implemented as:
+
+identity-cost.js
+identity-cost-reducer.js
+solana-networks.js
+solana-wallet.js
+solana-rpc.js
+identity-flow.js
+
+The core verification layer operates on a chain-independent shape:
+
+NormalizedBurnTx
+
+A second blockchain can therefore be integrated by implementing:
+
+xxx-wallet.js
+xxx-rpc.js
+
+without rewriting:
+
+identity-cost.js
+
+---
+
+Identity registration is not proof of personhood
+
+This distinction is fundamental.
+
+A Solana burn demonstrates that:
+
+- a key controlled the transaction;
+- that key incurred the required external cost.
+
+It does not demonstrate:
+
+- that the key belongs to a unique human;
+- that the operator is a legal person;
+- that one human cannot operate multiple identities.
+
+AIWA's current identity mechanism is therefore better described as:
+
+«proof of control + proof of economic cost»
+
+rather than proof of human identity.
+
+---
+
+Identity churn resistance
+
+The optional cost curve uses the Solana confirmation slot.
+
+The required burn for a new registration can increase monotonically with the slot at which the previous burn was confirmed.
+
+This creates a deployment-relative economic pressure against repeatedly abandoning old identities.
+
+The mechanism does not solve identity churn completely.
+
+It is explicitly a mitigation.
+
+---
+
+Solana wallet security
+
+The wallet layer uses:
+
+- real Ed25519 keypairs;
+- AES-256-GCM encryption;
+- Web Crypto;
+- encrypted persistence.
+
+Plaintext secret keys are not written to persistent storage.
+
+The implementation has been tested against the actual Solana web3 libraries.
+
+A real signature can be generated, serialized, deserialized, and verified.
+
+---
+
+Solana network modes
+
+The application exposes:
+
+devnet
+mainnet
+
+Devnet is the default.
+
+The UI explicitly warns that faucet SOL does not provide meaningful real-world Sybil resistance.
+
+Mainnet operations are irreversible economic operations and therefore sit behind explicit confirmation.
+
+The RPC integration is real code using real "fetch()" calls.
+
+However, the current development environment has not exercised the live RPC path because it has no network access.
+
+That limitation is intentional and documented rather than hidden behind a fake successful implementation.
+
+---
+
+Third-party modules
+
+AIWA permits open module registration.
+
+There is no allow-list.
+
+There is no centralized approval step.
+
+The platform mechanically rejects:
+
+- duplicate module IDs;
+- invalid economic declarations for issuing modules;
+- inconsistent signed submissions;
+- code whose fetched bytes do not match its registered hash;
+- unauthorized updates.
+
+Auditing is a separate future mechanism.
+
+A module is not trusted merely because it is registered.
+
+---
+
+Content-addressed modules
+
+Each module is bound to a SHA-256 code hash.
+
+The module identity therefore refers to:
+
+module ID
++
+exact code hash
+
+rather than merely:
+
+mutable URL
+
+This matters because a mutable URL could otherwise silently change the code after an audit.
+
+If the code changes:
+
+audit status → unaudited
+
+The old verdict does not automatically transfer to the new bytes.
+
+---
+
+Module registry
+
+The registry provides:
+
+registerModule()
+updateModuleCode()
+auditModule()
+
+For issuing modules, the economic declaration is validated against the actual reward function.
+
+The declared identity scheme is derived from the declaration:
+
+strong
+weak
+non-issuing
+
+The UI presents this as a labeled status rather than treating the label itself as a security proof.
+
+---
+
+Registry replication
+
+Module registry state is itself a materialized view over the event DAG.
+
+Events include:
+
+module-register
+module-update
+module-audit
+
+When domains reconcile:
+
+merge()
+    ↓
+H_d
+    ↓
+module-registry-reducer
+    ↓
+registry state
+
+A module registered on one domain can therefore propagate to other reconciled domains without a centralized registry database.
+
+---
+
+Module rank
+
+Module ranking uses the author's economic state.
+
+The sort key is derived from:
+
+r(burnedLamports, elapsedEpochs, θ)
+
+Submission eligibility includes a ratio-must-not-decline check modeled on the reference "checkScoreEligibility" behavior.
+
+The rank layer exposes:
+
+rankFromIdentityAndCadence()
+
+which composes identity and cadence materialized state.
+
+Rank is displayed in the domain catalog.
+
+It does not control desktop layout order.
+
+This is intentional.
+
+A renderer must not silently reorder user-managed desktop items whenever the computed economic rank changes.
+
+---
+
+Signed module submissions
+
+Module submissions contain:
+
+moduleId
+codeHash
+codeUrl
+nonce
+timestamp
+signature
+
+The submission path:
+
+1. fetches the actual module code;
+2. computes its hash;
+3. verifies the hash against the submitted hash;
+4. verifies the Ed25519 signature;
+5. checks the nonce/replay guard;
+6. verifies author permissions;
+7. registers or updates the module.
+
+The economic gate does not control publishing.
+
+Signing provides:
+
+- attribution;
+- integrity;
+- authorization.
+
+It is not itself an economic ranking mechanism.
+
+Cross-language submission parity verifies both directions:
+
+JS signs → Rust verifies
+Rust signs → JS verifies
+
+Each parity run uses freshly generated keypairs.
+
+---
+
+Module sandbox
+
+Third-party code runs inside:
+
+<iframe sandbox="allow-scripts">
+
+without:
+
+allow-same-origin
+
+The module therefore does not execute directly inside the host application's JavaScript context.
+
+The host exposes the module API through "postMessage".
+
+The module does not receive a direct reference to the host's internal application objects.
+
+Before mounting:
+
+fetch code
+    ↓
+SHA-256
+    ↓
+compare registered hash
+    ↓
+mount only if identical
+
+A code/hash mismatch blocks mounting.
+
+The close button cleanly unmounts the module.
+
+---
+
+Sandbox security boundary
+
+The sandbox is an isolation mechanism, not a claim that arbitrary third-party code is harmless.
+
+Important security surfaces include:
+
+- "postMessage" validation;
+- message origin/source validation;
+- replayed messages;
+- malicious payloads;
+- resource exhaustion;
+- network behavior;
+- storage abuse;
+- event spam;
+- module lifecycle;
+- communication between module instances.
+
+The current implementation establishes a strong browser execution boundary, but a complete adversarial sandbox audit remains future work.
+
+---
+
+Module "ctx" API
+
+Modules receive a constrained context.
+
+Storage
+
+ctx.storage.get(key)
+ctx.storage.set(key, value)
+
+Storage is scoped to:
+
+(domain, moduleId)
+
+Notifications
+
+ctx.toast(message)
+
+The notification is logged through the application event system.
+
+Economics
+
+ctx.commit(b)
+ctx.claim()
+
+Modules can interact with the economic layer through the host-controlled API.
+
+Causal events
+
+ctx.postCausalEvent(type, payload)
+
+The host forces the actual caller's domain ID onto the event.
+
+A module cannot simply declare itself to be another domain.
+
+Causal state
+
+ctx.queryCausalState(contractId)
+
+Hyperprofile
+
+ctx.share(key, value)
+
+"null" retracts a previously published value.
+
+Peer communication
+
+ctx.sendToPeer(domainId, message)
+ctx.onPeerMessage(handler)
+
+Messages are routed through the transport layer.
+
+Theme
+
+ctx.theme
+
+contains the active theme as parseable JSON.
+
+The same theme values are also exposed as CSS custom properties.
+
+---
+
+Transport
+
+The transport layer is deliberately independent from the ledger.
+
+transport.js
+
+defines the interface.
+
+"assertImplementsTransport()" verifies that a backend actually implements the required methods and fails loudly if it does not.
+
+---
+
+Delay-tolerant transport
+
+"delay-tolerant-transport.js" provides durable queue-then-attempt semantics.
+
+Before network transmission:
+
+message
+   ↓
+durable queue
+   ↓
+network attempt
+
+Per-peer FIFO order is preserved.
+
+If the first message fails:
+
+message 1 → failure
+message 2 → wait
+message 3 → wait
+
+Different peers have independent queues.
+
+A successfully delivered message is removed from the queue.
+
+It is not left permanently marked as queued.
+
+---
+
+Connection watchdog
+
+"connection-watchdog.js" detects stale connections.
+
+The watchdog:
+
+- fires the stale callback once per stale episode;
+- does not repeatedly fire while the connection remains stale;
+- resets after reconnection;
+- handles the exact timeout boundary explicitly.
+
+An injected clock makes the behavior deterministic and testable.
+
+---
+
+WebRTC
+
+The intended future transport is a WebRTC mesh.
+
+The current repository contains an explicit stub rather than a fake implementation.
+
+Real signaling infrastructure is not available in the development environment.
+
+The project deliberately does not pretend that an unconnected placeholder is a functional peer-to-peer network.
+
+---
+
+Reconciliation
+
+The UI's Reconcile action goes through:
+
+transport.send()
+
+rather than directly calling:
+
+dag.merge()
+
+When the simulated local link is up, the message can result in a real DAG merge.
+
+When the link is down:
+
+transport
+    ↓
+durable queue
+
+The UI exposes:
+
+- per-contact connectivity;
+- queue depth;
+- flush controls.
+
+This makes the delay-tolerant behavior observable rather than purely theoretical.
+
+---
+
+Pools
+
+The pool reducer is a general-purpose pooling primitive.
+
+Events include:
+
+pool-init
+pool-contribute
+pot-release
+
+A pool creates a pot address without a corresponding keypair.
+
+This is intentional.
+
+No individual party should be able to move pooled funds merely because the application represents the pot with an address.
+
+Pool payouts are verified using the causal-condition evaluator.
+
+---
+
+Weighted draws
+
+The jackpot example uses deterministic weighted draws.
+
+The draw is derived from:
+
+poolId
+cycleIndex
+contributions
+
+Both JavaScript and Rust produce identical:
+
+winnerDomain
+totalAmount
+drawHash
+
+The full 64-character draw hash is pinned in a regression test.
+
+---
+
+Composable verification
+
+"causal-condition-evaluator.js" provides a declarative verification language.
+
+The six primitives are:
+
+ownership
+signature
+count
+deterministic-match
+unique
+causal-order
+
+They can be composed with:
+
+AND
+OR
+NOT
+
+The evaluator never executes submitted code.
+
+Conditions are data.
+
+For example, a contract can express:
+
+COUNT(approvals) >= 2
+
+without executing arbitrary JavaScript supplied by the contract creator.
+
+---
+
+Why this evaluator exists
+
+Before introducing the evaluator, several reducers contained hand-written security checks.
+
+The evaluator extracts these recurring causal concepts into a shared primitive layer.
+
+The pool reducer was migrated to the evaluator.
+
+The existing pool test suite continued to pass unchanged.
+
+This is intended to demonstrate that the evaluator is a composable verification abstraction rather than a second independent policy engine.
+
+---
+
+Generic contracts
+
+"generic-contract-reducer.js" allows third parties to define contracts without modifying platform code.
+
+The crucial security rule is:
+
+«A contract condition is fixed at mint time.»
+
+The mint event chooses:
+
+condition
+
+That condition becomes immutable for the lifetime of the contract.
+
+A release event contains only:
+
+claimId
+from
+to
+contractId
+
+It cannot supply a new condition.
+
+This prevents a malicious release from doing:
+
+release(condition = true)
+
+when the actual contract was minted with:
+
+condition = false
+
+The implementation explicitly tests condition smuggling.
+
+An injected release-time condition is ignored.
+
+The original minted condition is the one evaluated.
+
+---
+
+Example contract: 2-of-2 escrow
+
+The repository includes a real example of a threshold-release escrow.
+
+The contract is expressed using the generic condition system.
+
+It uses:
+
+count
+
+over real approval events.
+
+It does not share implementation code with the pool reducer.
+
+This demonstrates that the generic contract layer can express application-specific rules without modifying the core protocol.
+
+---
+
+Jackpot example
+
+The repository includes:
+
+examples/jackpot-plugin/jackpot.js
+
+The plugin demonstrates a real application built from the AIWA primitives.
+
+The jackpot is:
+
+- funded through AIWA;
+- represented through the pool system;
+- released through deterministic conditions.
+
+The pool-address prefix:
+
+jackpot-pot:<poolId>
+
+is intentionally preserved.
+
+Renaming implementation files must not silently change identifiers already present in live event history.
+
+Historical identifiers are protocol data.
+
+They are not refactoring details.
+
+---
+
+Presentation
+
+The presentation layer provides two themes:
+
+default
+compact
+
+The themes use the same token key set.
+
+The compact theme is designed for:
+
+- bandwidth-constrained nodes;
+- hardware-constrained environments;
+- maximum contrast;
+- reduced secondary visual information.
+
+"themeToCssVariables()" generates an actual CSS ":root {}" block.
+
+Changing the active theme is deliberately narrow:
+
+activeThemeId = ...
+
+The presentation selector has one state side effect and does not modify application state elsewhere.
+
+---
+
+Design system
+
+The current visual system uses:
+
+dark base
+amber accent
+IBM Plex Mono
+IBM Plex Sans
+hairline borders
+near-zero border radius
+no shadows
+no gradients
+
+Semantic green/red states are reserved for proof/status semantics.
+
+The vocabulary:
+
+Proved
+Tested
+Conditional
+Open
+
+is treated as a real UI primitive.
+
+The goal is to make the epistemic status of a mechanism visible rather than presenting every feature as equally proven.
+
+---
+
+Desktop
+
+"desktop-layout.js" is deliberately DOM-free.
+
+It implements:
+
+- reorder;
+- fold two icons into a folder;
+- merge into an existing folder;
+- eject;
+- remove.
+
+The desktop layout remains user-controlled.
+
+Economic rank is computed and displayed but does not reorder desktop items.
+
+This avoids a subtle state-loss bug where a renderer could overwrite user layout every time materialized state was refreshed.
+
+Storage migration supports older flat pin-list formats.
+
+Corrupt storage degrades to an empty layout instead of crashing the application.
+
+---
+
+AI idea agent
+
+The AI layer is intentionally non-authoritative.
+
+The idea agent consumes context from:
+
+- local desktop pins;
+- published module information;
+- local hyperprofile data;
+- recent network module categories;
+- category gaps;
+- multi-contact overlap;
+- GitHub trends;
+- module primitive usage.
+
+It produces:
+
+suggestions
+
+It does not produce authoritative protocol events.
+
+It does not write consensus state.
+
+It does not decide economic validity.
+
+It does not participate in ledger convergence.
+
+---
+
+Idea context
+
+The agent considers the most recently registered third of the known network when computing trending categories.
+
+This prevents stale historical activity from permanently dominating current suggestions.
+
+Multi-contact overlap requires:
+
+2+ distinct contacts
+
+registering modules in a category.
+
+Two modules from one contact do not count as multi-contact evidence.
+
+Category gaps identify areas present in the network but missing locally.
+
+---
+
+GitHub trends
+
+The repository contains:
+
+public/data/github-trends.json
+
+generated by:
+
+scripts/fetch-github-trends.mjs
+
+The GitHub Action runs daily.
+
+It uses GitHub's public repository search API.
+
+The data is:
+
+- clearly labeled as external;
+- used for inspiration only;
+- not treated as AIWA network activity;
+- not inserted into fields representing authoritative network state.
+
+The application loads it lazily and caches it.
+
+Rendering never blocks on the external trends request.
+
+Freshness is represented honestly because the data can be stale.
+
+---
+
+Module pattern miner
+
+"module-pattern-miner.js" examines verified local module code.
+
+It uses the same hash-verifying loader used for mounting.
+
+It looks for actual usage of:
+
+storage
+postCausalEvent
+share
+sendToPeer
+...
+
+The analysis is bounded to 20 modules.
+
+The result is cached and non-blocking.
+
+Unused primitives become idea-agent signals:
+
+nobody in the current local registry appears to be using X
+
+The agent does not receive generated code skeletons.
+
+The rendered prompt intentionally avoids representing these observations as code templates.
+
+---
+
+WebLLM engine
+
+"webllm-engine.js" uses:
+
+- WebGPU detection;
+- a dedicated Worker;
+- "@mlc-ai/web-llm";
+- streaming inference.
+
+The engine is intended to run locally in the browser.
+
+The current environment cannot execute the browser/WebGPU path, so this component is marked accordingly.
+
+---
+
+Hyperprofile
+
+The public profile system is itself a DAG-replicated materialized view.
+
+The API is:
+
+ctx.share(key, value)
+
+and:
+
+ctx.share(key, null)
+
+for retraction.
+
+The reducer uses latest-write-wins semantics.
+
+Profiles therefore propagate through:
+
+H_d
+
+rather than through a centralized profile database.
+
+The Contacts UI can inspect what another domain's modules have genuinely published.
+
+---
+
+Peer messaging
+
+Modules can communicate in real time through:
+
+ctx.sendToPeer(domainId, message)
+
+and:
+
+ctx.onPeerMessage(handler)
+
+The message is routed through the transport layer.
+
+Delivery occurs only if the target module is currently mounted.
+
+There is deliberately no inbound queue for module messages.
+
+Real-time module messages do not automatically cause a DAG merge.
+
+The host distinguishes the declared message type before deciding whether the message represents:
+
+- ephemeral communication;
+- causal ledger data.
+
+This prevents a real-time UI message from silently becoming consensus state.
+
+---
+
+Cross-language parity
+
+AIWA maintains two independent implementations of important protocol logic:
+
+JavaScript
+Rust
+
+The goal is not merely performance.
+
+A second implementation can expose assumptions that would remain invisible in a single implementation.
+
+Current parity coverage includes:
+
+Layer| Verification
+Event IDs| JS/Rust test vectors
+"G" materialization| JS/Rust scenario vectors
+Conservation| JS/Rust scenario vectors
+Module signatures| JS ↔ Rust both directions
+Pool weighted draw| Rust regression parity
+Formula behavior| shared expected values
+
+---
+
+Event ID parity
+
+Script:
+
+./scripts/verify-parity.sh
+
+Vector:
+
+test-vectors/id-parity.json
+
+The test covers canonicalization cases where JavaScript and Rust could otherwise serialize equivalent objects differently.
+
+---
+
+"G" parity
+
+Script:
+
+./scripts/verify-g-parity.sh
+
+Vector:
+
+test-vectors/g-scenario.json
+
+The same event history is materialized through both implementations.
+
+The resulting state is compared.
+
+---
+
+Conservation parity
+
+Script:
+
+./scripts/verify-conservation-parity.sh
+
+Vector:
+
+test-vectors/conservation-scenario.json
+
+This verifies that the JS and Rust conservation implementations agree on the same causal state transitions.
+
+---
+
+Submission parity
+
+Script:
+
+./scripts/verify-submission-parity.sh
+
+Two directions are tested:
+
+JS signs → Rust verifies
+Rust signs → JS verifies
+
+Fresh keypairs are generated during each run.
+
+This prevents the parity test from depending on a permanently embedded test key.
+
+---
+
+Adversarial counterexamples
+
+AIWA deliberately keeps broken implementations as tests.
+
+They are not production features.
+
+They exist to demonstrate why particular protocol rules exist.
+
+---
+
+Wall-clock counterexample
+
+Files:
+
+tests/counterexample-wallclock.test.mjs
+rust-core/tests/counterexample_wallclock.rs
+
+The broken implementation derives cadence from an injected wall clock.
+
+The same event set can then materialize to radically different balances depending only on when it is replayed.
+
+The test demonstrates a roughly 100× difference under the counterexample scenario.
+
+The production materializer therefore derives economic state from cadence events rather than replay time.
+
+---
+
+Non-atomic consume counterexample
+
+Files:
+
+tests/counterexample-nonatomic-consume.test.mjs
+rust-core/tests/counterexample_nonatomic_consume.rs
+
+The broken design splits:
+
+check
+
+from:
+
+consume
+
+Two concurrent branches can both observe an unconsumed proof before either branch records its consumption.
+
+Both can then create destination claims.
+
+The result is a double-spend.
+
+The production conservation design keeps the consumption invariant atomic.
+
+---
+
+Lemma 1 counterexample
+
+File:
+
+tests/lemma1.test.mjs
+
+A weak identifier that omits cadence state can collide two events whose rewards differ under cadence-sensitive "β".
+
+The test confirms that the collision is safe only in the special case:
+
+β = 0
+
+The current design therefore treats the relevant cadence information as part of the identity of the economically meaningful event.
+
+---
+
+Threat model
+
+AIWA should be evaluated against several classes of adversary.
+
+Malicious peer
+
+A malicious peer may:
+
+- submit invalid events;
+- replay events;
+- reorder received events;
+- create concurrent branches;
+- lie about ownership;
+- attempt to forge another domain;
+- submit invalid module metadata;
+- submit malicious release requests.
+
+The protocol must reject invalid cryptographic and causal claims.
+
+---
+
+Malicious module
+
+A third-party module is considered untrusted.
+
+It may attempt to:
+
+- lie about its identity;
+- submit forged domain information;
+- manipulate host messages;
+- abuse storage;
+- spam events;
+- abuse peer messaging;
+- exploit the host/module messaging boundary;
+- serve code different from the registered hash.
+
+The module must therefore execute outside the host JavaScript context and communicate through the constrained API.
+
+---
+
+Malicious transport
+
+The transport layer must be treated as unreliable.
+
+Messages may:
+
+- be delayed;
+- fail;
+- arrive after a partition;
+- be retried;
+- be absent for an arbitrary period.
+
+The ledger cannot assume continuous connectivity.
+
+---
+
+External-chain failure
+
+Solana may be:
+
+- unreachable;
+- delayed;
+- unavailable to a particular peer;
+- on a different network than intended;
+- incorrectly configured.
+
+The core identity-cost verifier is therefore separated from the RPC/wallet layer.
+
+---
+
+Browser failure
+
+The browser may:
+
+- close;
+- reload;
+- lose network access;
+- lose WebGPU;
+- lose WebRTC connectivity.
+
+The ledger is persisted locally so that application state can be reconstructed after a reload.
+
+---
+
+Security invariants
+
+The following are central invariants.
+
+Ledger
+
+Known event + same event ID
+→ no second event
+
+merge(A, B)
+→ set union
+
+same canonical event
+→ same event ID
+
+---
+
+Materialization
+
+same H_d
++
+same θ
++
+same canonical order
+→ same materialized result
+
+The remaining caveat is numeric semantics across environments, which is an open formalization item.
+
+---
+
+Cadence
+
+cadence transition
+→ monotonic
+→ bounded +1
+→ valid VDF required
+
+---
+
+Conservation
+
+Consume(p) ≤ 1
+
+One proof cannot be consumed twice.
+
+---
+
+Ownership
+
+A declared domain label is insufficient.
+
+Transfer authorization requires:
+
+valid signature
++
+SHA-256(publicKey) == source domain
+
+---
+
+Replay protection
+
+Nonce/replay guards are used in:
+
+- cadence;
+- transfer;
+- module submission.
+
+---
+
+Module integrity
+
+fetchedCodeHash == registeredCodeHash
+
+must hold before mounting.
+
+---
+
+Module update authorization
+
+An existing module can only be updated by its recorded author.
+
+---
+
+Contract immutability
+
+A release event cannot redefine the contract's condition.
+
+The condition comes from the original mint record.
+
+---
+
+Host-controlled identity
+
+The host forces the actual caller's domain ID onto module-generated causal events.
+
+A module cannot simply put another domain ID in its own payload and expect the host to accept it.
+
+---
+
+What is actually guaranteed
+
+The current implementation has strong evidence for the following properties.
+
+Deterministic event identifiers
+
+JS and Rust agree on canonical event IDs across the current test vectors.
+
+Idempotent DAG merge
+
+Duplicate event insertion does not create duplicate events.
+
+Deterministic replay ordering
+
+The replay order is explicitly defined and tested.
+
+Persistence of event history
+
+The event DAG survives browser reload through IndexedDB.
+
+Cadence monotonicity
+
+Cadence transitions are bounded and replay protected.
+
+VDF enforcement
+
+Cadence transitions without the required VDF are rejected by the economics layer.
+
+Scarcity clamping
+
+Issuance cannot exceed the configured materialized budget through the normal issuance path.
+
+Cryptographic transfer authorization
+
+A malicious key cannot sign a transfer pretending to be another domain.
+
+Conservation single-consumption invariant
+
+The broken non-atomic implementation is explicitly demonstrated and excluded from production.
+
+Module code integrity
+
+Code is hash-checked before mounting.
+
+Module update authorization
+
+Updates require the recorded author.
+
+Immutable contract conditions
+
+Release events cannot inject their own verification condition.
+
+Cross-language agreement
+
+Important JS/Rust layers are checked against shared vectors and parity scripts.
+
+---
+
+What is not guaranteed
+
+AIWA does not currently claim:
+
+Proof of personhood
+
+The identity mechanism proves key control and economic cost, not uniqueness of a human.
+
+Perfect Sybil resistance
+
+Economic identity cost makes Sybil attacks more expensive but does not make them impossible.
+
+Hardware-independent time
+
+The SHA-256 cadence VDF is not a true asymmetric VDF and is hardware-relative.
+
+Global consensus
+
+Canonical ordering makes a converged event set deterministic. It does not itself prove that all honest participants will converge on the same event set under every adversarial network condition.
+
+Byzantine consensus
+
+AIWA is not currently presented as a replacement for a formally proven Byzantine consensus protocol.
+
+Perfect browser sandbox security
+
+The iframe boundary significantly constrains modules, but the entire host/module messaging and resource-exhaustion surface requires further adversarial auditing.
+
+Perfect external-chain availability
+
+Solana RPC and finality remain external dependencies for identity registration.
+
+Cross-platform numeric equivalence
+
+Formal numeric/float semantics remain an open protocol item.
+
+Formal protocol versioning
+
+The protocol currently lacks a fully specified version-negotiation/conformance system.
+
+Complete conformance certification
+
+Current vectors are strong regression tools but are not yet a formal, exhaustive protocol conformance suite.
+
+Authoritative AI
+
+The AI system intentionally has no authoritative protocol role.
+
+---
+
+Testing
+
+Current repository test counts:
+
+415 JavaScript tests
+238 Rust tests
+    232 library tests
+    6 integration tests
+0 warnings
+
+The exact counts are expected to evolve as the project changes.
+
+---
+
+JavaScript tests
+
+Install the development dependencies:
+
+npm install
+
+Run:
+
 node --test tests/*.test.mjs
 
-# Rust (native; no wasm32 target needed)
-cd rust-core
+The application itself does not require npm at runtime.
+
+The package dependencies are primarily used for cryptographic and Solana-related tests.
+
+---
+
+Rust tests
+
+From:
+
+rust-core/
+
+run:
+
 cargo test
 
-# Cross-language parity (no npm install needed)
+No WASM target is required for native Rust tests.
+
+---
+
+Cross-language parity
+
+Run:
+
 ./scripts/verify-parity.sh
 ./scripts/verify-g-parity.sh
 ./scripts/verify-conservation-parity.sh
 ./scripts/verify-submission-parity.sh
-```
 
-Current counts: **415 JS tests · 238 Rust tests (232 lib + 6 integration) · zero warnings either language**.
+These scripts are also executed in CI.
 
 ---
 
-## Building Rust → WASM
+CI
 
-```bash
-# On a machine with rustup:
+The repository's GitHub Actions workflows include:
+
+ci.yml
+deploy-pages.yml
+update-github-trends.yml
+
+CI performs:
+
+- Rust tests;
+- JavaScript tests;
+- parity checks;
+- WASM build;
+- binary publication;
+- deployment.
+
+The GitHub trends workflow runs independently.
+
+The CI workflow ignores the daily generated trends commit so that the bot does not trigger an unnecessary full protocol CI run.
+
+---
+
+Building Rust → WASM
+
+Install the target:
+
+rustup target add wasm32-unknown-unknown
+
+Install wasm-pack:
+
+cargo install wasm-pack
+
+Then:
+
+cd rust-core
+
+wasm-pack build \
+  --target web \
+  --out-dir ../public/js/wasm \
+  --out-name aiwa_core
+
+The resulting WASM artifacts are loaded through:
+
+ledger-bridge.js
+
+The CI workflow builds the binary automatically and commits it to the repository.
+
+---
+
+WASM status
+
+The WASM binary has been confirmed to load in a deployed browser session without browser errors.
+
+What remains open is a live side-by-side comparison in the browser:
+
+JS backend result
+vs
+WASM backend result
+
+for the same runtime scenarios.
+
+Native cross-language parity exists.
+
+Browser-level live comparison remains a separate validation target.
+
+---
+
+Deploying to GitHub Pages
+
+AIWA is designed to deploy as a static application.
+
+One-time GitHub configuration:
+
+Repository
+→ Settings
+→ Pages
+→ Source
+→ GitHub Actions
+
+The deployment workflow serves:
+
+public/
+
+directly.
+
+There is no application build step.
+
+The browser receives the static application and executes the JavaScript locally.
+
+---
+
+No-server architecture
+
+The application does not require an application server to materialize its local state.
+
+The core path is:
+
+browser
+ ↓
+local event DAG
+ ↓
+IndexedDB
+ ↓
+deterministic reducers
+ ↓
+materialized application
+
+External services are used only where the design explicitly requires them, such as:
+
+- Solana identity registration;
+- GitHub trend retrieval;
+- future WebRTC signaling infrastructure.
+
+Those dependencies are not silently promoted to authoritative application databases.
+
+---
+
+Whitepaper
+
+The formal design document is:
+
+docs/AIWA_whitepaper_v1_2_revised.md
+
+The implementation and whitepaper are intentionally maintained together.
+
+When implementation work exposes a genuine protocol issue, such as:
+
+- a bug;
+- a missing invariant;
+- a model/implementation divergence;
+- an interoperability requirement;
+
+the finding is incorporated into the relevant section of the paper.
+
+It is not treated merely as a changelog entry.
+
+---
+
+Claim–Evidence–Assumption matrix
+
+The whitepaper maintains a §17 Claim–Evidence–Assumption Matrix.
+
+The current status includes:
+
+Closed
+
+R11 — cadence integrity
+
+Addressed through the cadence VDF mechanism.
+
+R19 — module sandbox isolation
+
+Addressed through the browser sandbox architecture.
+
+Dampened
+
+Identity churn
+
+The slot-scaled identity cost reduces the attack incentive but does not eliminate it.
+
+Open
+
+WASM live-results comparison
+Numeric / float consensus semantics
+Protocol versioning
+Formal conformance vectors
+Authoritative AI layer
+
+These should remain visible until their corresponding evidence exists.
+
+---
+
+Known limitations and open work
+
+1. Consensus and convergence
+
+The event DAG defines a deterministic result for a given converged event set.
+
+The remaining research question is stronger:
+
+«Under what adversarial network and event-generation assumptions do honest participants necessarily converge on a compatible event set and therefore compatible state?»
+
+This needs a dedicated adversarial analysis.
+
+---
+
+2. Numeric semantics
+
+The protocol currently uses numeric computations that are straightforward in the existing implementations.
+
+A production consensus specification needs to formally define:
+
+- floating-point representation;
+- rounding;
+- NaN handling;
+- infinity handling;
+- overflow;
+- underflow;
+- platform differences;
+- WASM versus JS numeric behavior.
+
+Until that specification exists, numeric consensus should be considered an open protocol item.
+
+---
+
+3. Protocol versioning
+
+A long-lived distributed protocol needs explicit version negotiation.
+
+Future work should define:
+
+protocol version
+event version
+formula version
+serialization version
+
+and the rules for mixed-version reconciliation.
+
+---
+
+4. Formal conformance suite
+
+The current test vectors are useful but limited.
+
+The next step is a versioned conformance suite that can be consumed by:
+
+JavaScript
+Rust
+WASM
+future implementations
+
+The goal is to make interoperability testable independently of implementation language.
+
+---
+
+5. Browser JS/WASM parity
+
+Native parity is already tested.
+
+A browser-level test should compare:
+
+JS ledger
+WASM ledger
+
+against the same runtime-generated event scenarios.
+
+---
+
+6. VDF strength
+
+The current cadence VDF is intentionally described as a sequential computational delay rather than a mathematically strong asymmetric VDF.
+
+Future work should quantify:
+
+- hardware variance;
+- GPU/CPU throughput;
+- parallel identity attacks;
+- expected epoch-generation rates;
+- attacker cost;
+- verification cost;
+- appropriate iteration calibration.
+
+---
+
+7. Identity external-chain assumptions
+
+The Solana layer introduces external assumptions.
+
+Future work should specify:
+
+- confirmation/finality requirements;
+- RPC failure semantics;
+- stale transaction handling;
+- network mismatch behavior;
+- chain reorganization assumptions;
+- replay behavior across networks.
+
+---
+
+8. Module sandbox adversarial testing
+
+The sandbox needs continued testing against:
+
+- malicious "postMessage";
+- cross-instance message confusion;
+- origin/source confusion;
+- resource exhaustion;
+- storage abuse;
+- network abuse;
+- event spam;
+- module lifecycle attacks;
+- navigation attacks;
+- host-side parser vulnerabilities.
+
+---
+
+9. Transport implementation
+
+The current delay-tolerant transport is real.
+
+The WebRTC mesh remains an explicit stub.
+
+A production mesh needs:
+
+- signaling;
+- peer discovery;
+- authentication;
+- NAT traversal;
+- connection lifecycle;
+- replay handling;
+- backpressure;
+- large-message handling.
+
+---
+
+10. AI authority
+
+The current AI layer is deliberately non-authoritative.
+
+If a future version gives AI permission to:
+
+- generate protocol events;
+- publish modules automatically;
+- alter contracts;
+- make economic decisions;
+
+then it must be treated as a new security boundary rather than an incremental UI feature.
+
+---
+
+Design principles
+
+AIWA follows several principles throughout the codebase.
+
+1. History before state
+
+If something matters to interoperability, put it in the event history.
+
+Do not rely on an unreplicated mutable variable.
+
+---
+
+2. Deterministic state before UI
+
+The UI is a presentation of materialized state.
+
+It should not become an implicit state machine.
+
+---
+
+3. Immutable definitions
+
+If changing a definition after the fact could invalidate previous verification, make the definition immutable.
+
+Examples:
+
+formula-register
+contract mint condition
+module code hash
+
+---
+
+4. Cryptography before labels
+
+Never treat:
+
+owner = "alice"
+
+as equivalent to cryptographic authorization.
+
+Use:
+
+signature
++
+public-key binding
+
+where authorization matters.
+
+---
+
+5. Sandboxing before trust
+
+Third-party code is not trusted because it claims to behave.
+
+It runs behind an explicit execution boundary.
+
+---
+
+6. Explicit external dependencies
+
+If a mechanism depends on:
+
+- Solana;
+- WebRTC;
+- GitHub;
+- WebGPU;
+
+the dependency should be visible in the architecture.
+
+Do not simulate success when the dependency is unavailable.
+
+---
+
+7. Broken implementations belong in tests
+
+A security invariant should ideally have a test showing what breaks when the invariant is removed.
+
+Examples:
+
+wall-clock cadence
+non-atomic consume
+weak identifiers
+
+---
+
+8. Refactoring must not rewrite history
+
+Protocol identifiers are data.
+
+Renaming an implementation function or file must not change identifiers already present in event history.
+
+---
+
+9. AI is advisory by default
+
+The AI layer should not silently become an authority.
+
+Suggestions and consensus are separate layers.
+
+---
+
+10. State what is not proven
+
+The architecture deliberately exposes open assumptions.
+
+A system is easier to audit when its uncertainty is explicit.
+
+---
+
+Status
+
+AIWA currently provides a working reference implementation of:
+
+- content-addressed event DAGs;
+- deterministic materialized state;
+- IndexedDB event persistence;
+- JS/Rust ledger parity;
+- cadence and replay protection;
+- sequential cadence VDF;
+- reward calculation;
+- scarcity limits;
+- immutable formula registration;
+- conservation state transitions;
+- cryptographically authenticated transfers;
+- Solana identity-cost registration;
+- identity-cost replication;
+- identity-churn damping;
+- content-addressed modules;
+- signed module submissions;
+- author-controlled module updates;
+- sandboxed module execution;
+- delay-tolerant transport;
+- connection watchdog;
+- deterministic pools;
+- composable causal conditions;
+- immutable generic contracts;
+- threshold-release escrow;
+- replicated public profiles;
+- local AI idea generation;
+- local module-pattern analysis;
+- WebLLM integration;
+- desktop state management;
+- multiple presentation themes;
+- GitHub trend ingestion;
+- cross-language regression testing.
+
+The current implementation should nevertheless be considered:
+
+«a serious reference implementation and security-oriented research prototype, not a formally verified production consensus system.»
+
+Its strongest current properties are deterministic event identity, explicit materialization rules, cryptographic authorization, immutable verification conditions, cross-language parity, and extensive regression/counterexample testing.
+
+Its most important remaining questions concern adversarial convergence, numeric consensus, protocol evolution, external-chain assumptions, browser sandbox hardening, VDF strength, and formal conformance.
+
+---
+
+Quick start
+
+Clone the repository and install test dependencies:
+
+npm install
+
+Run JavaScript tests:
+
+node --test tests/*.test.mjs
+
+Run Rust tests:
+
+cd rust-core
+cargo test
+cd ..
+
+Run cross-language parity:
+
+./scripts/verify-parity.sh
+./scripts/verify-g-parity.sh
+./scripts/verify-conservation-parity.sh
+./scripts/verify-submission-parity.sh
+
+For WASM:
+
 rustup target add wasm32-unknown-unknown
 cargo install wasm-pack
+
 cd rust-core
-wasm-pack build --target web --out-dir ../public/js/wasm --out-name aiwa_core
-```
+wasm-pack build \
+  --target web \
+  --out-dir ../public/js/wasm \
+  --out-name aiwa_core
 
-CI builds and commits this binary automatically on every push. `ledger-bridge.js` picks it up on next reload. The binary has been confirmed to load in a deployed browser session with zero errors. What remains open: a live side-by-side comparison of WASM-backed vs. JS-backed computed results in the browser.
-
----
-
-## Deploy to GitHub Pages
-
-One-time setup: GitHub repo → **Settings → Pages** → set source to **GitHub Actions**.
-
-`.github/workflows/deploy-pages.yml` deploys `public/` on every push to `main`. No build step — the same pure JS `public/` directory is served as-is.
+Then deploy the "public/" directory through GitHub Pages.
 
 ---
 
-## Whitepaper
+One-sentence summary
 
-`docs/AIWA_whitepaper_v1_2_revised.md` is kept in sync with the implementation. When the implementation surfaces a real finding — a bug, a gap in the model, a divergence between spec and what two interoperating implementations require — it gets a precise addition at the relevant point in the paper, not a standalone changelog bullet.
+AIWA is an offline-first, browser-native application architecture in which immutable, content-addressed events are reconciled through a delay-tolerant DAG and deterministically materialized into application state, with cryptographic identity, conservation, composable contracts, sandboxed modules, and an explicitly non-authoritative AI layer.
 
-The §17 Claim-Evidence-Assumption Matrix is kept current. Closed: R11 (cadence integrity, VDF), R19 (module sandbox isolation). Dampened (not fully closed): identity churn. Open: WASM live-results comparison, AI authoritative layer, numeric/float consensus semantics, protocol versioning, formal conformance test vectors.
+---
+
+Final security statement
+
+AIWA does not ask the reader to trust the implementation simply because it contains cryptography or hundreds of tests.
+
+The intended model is:
+
+claim
+  ↓
+explicit invariant
+  ↓
+implementation
+  ↓
+unit test
+  ↓
+counterexample
+  ↓
+cross-language parity
+  ↓
+documented assumption
+
+Where evidence does not yet exist, the project says so.
+
+That distinction is part of the protocol design.
