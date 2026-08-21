@@ -1,6 +1,6 @@
 // solana-wallet.js — real Solana keypair management and burn-transaction
-// construction/signing, backing the identity-cost mechanism (§24, §26)
-// with actual working code, not a placeholder.
+// construction/signing, backing the identity-cost mechanism with actual
+// working code, not a placeholder.
 //
 // This file is deliberately split from the network-touching parts
 // (solana-rpc.js): everything here — key generation, password
