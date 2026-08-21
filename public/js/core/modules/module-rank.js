@@ -3,11 +3,11 @@
 // questions:
 //
 //   1. RANK — where a module sorts in the list. Computed from its
-//      author's identity-cost burn (§24) and how many cadence epochs
-//      have elapsed since that burn — reusing reward.js's real,
-//      already-tested Proof-of-Will formula directly, not a second one.
-//      A larger burn, aged longer, ranks higher — the same "will over
-//      time" logic §10 already establishes for accrual, applied here to
+//      author's identity-cost burn and how many cadence epochs have
+//      elapsed since that burn — reusing reward.js's real, already-
+//      tested Proof-of-Will formula directly, not a second one. A
+//      larger burn, aged longer, ranks higher — the same "will over
+//      time" logic already established for accrual, applied here to
 //      sorting instead of issuance.
 //   2. ELIGIBILITY — whether an author may register a genuinely NEW
 //      module id at all. Modeled directly on a real prior
@@ -31,12 +31,13 @@ import { reward } from '../economics/reward.js';
 
 /**
  * The module list's sort key. Reuses the real reward function directly
- * — this is not a second formula to keep in sync with §10's, it IS
- * §10's formula (the real Proof-of-Will structure, reward.js), applied
- * to (the author's burned lamports, epochs elapsed since that burn).
- * qTotal and q are the same value here — see rankFromIdentityAndCadence's
- * documented simplification below — and patienceRate defaults to 0 (no
- * per-module patience concept yet; out of scope for this pass).
+ * — this is not a second formula to keep in sync with the reward
+ * formula, it IS that formula (the real Proof-of-Will structure,
+ * reward.js), applied to (the author's burned lamports, epochs elapsed
+ * since that burn). qTotal and q are the same value here — see
+ * rankFromIdentityAndCadence's documented simplification below — and
+ * patienceRate defaults to 0 (no per-module patience concept yet; out
+ * of scope for this pass).
  *
  * @param {number} burnedLamports
  * @param {number} epochsElapsed
@@ -56,7 +57,7 @@ export function computeModuleRank(burnedLamports, epochsElapsed, rewardParams) {
  * the author's rank/elapsed-epochs at this attempt versus their last
  * submission. Mirrors the real reference implementation's ratio test
  * exactly: (score+1)/(laps+1) must not decrease. Using epochsElapsed as
- * both this project's q (§10) and the reference's "laps" is a
+ * both this project's q and the reference's "laps" is a
  * deliberate simplification, not an approximation of two different
  * things — both concepts exist to measure elapsed protocol time since
  * the last relevant action, and this project already has exactly one
@@ -89,7 +90,7 @@ export function checkSubmissionEligibility(newRank, newEpochsElapsed, lastSubmis
  * state a domain already has: its identity-cost burn (identity-cost.js)
  * and its current cadence epoch (cadence.js). Returns 0 for a domain
  * with no registered identity cost — it cannot rank at all until it
- * has paid c_id, matching §24.6(v)'s "identity admitted only after a
+ * has paid c_id, matching the "identity admitted only after a
  * verified burn" requirement.
  *
  * Documented simplification, not a silent approximation: this uses the
