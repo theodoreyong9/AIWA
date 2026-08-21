@@ -5,7 +5,7 @@
 // on-chain finality — the only thing devnet SOL lacks is market value.
 //
 // That lack of value is not a footnote: on devnet, c_id provides ZERO
-// real Sybil resistance (§24), since anyone can mint unlimited free SOL
+// real Sybil resistance, since anyone can mint unlimited free SOL
 // from a faucet and burn it costlessly. Devnet is for proving the
 // MECHANISM works; only a mainnet burn is a real economic cost. Any UI
 // using this module must show which network is active, not bury it.
@@ -21,7 +21,7 @@ export const SOLANA_NETWORKS = {
     ],
   },
   'mainnet-beta': {
-    label: 'Mainnet (real SOL, irreversible — real c_id per §24)',
+    label: 'Mainnet (real SOL, irreversible — real c_id)',
     rpcEndpoint: 'https://api.mainnet-beta.solana.com',
     isRealCost: true,
     faucets: [],
