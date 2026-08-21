@@ -1,4 +1,4 @@
-// module-sandbox.js — the actual runtime isolation boundary, §27.
+// module-sandbox.js — the actual runtime isolation boundary.
 //
 // This is what the security critique (discussed with the user, see
 // README.md's Modules section for the full writeup) identified as
@@ -30,7 +30,7 @@
 // future pass; this file has not been exercised that way yet — treat
 // it as unverified until it's run in a real browser.
 //
-// theme-tokens.js's ThemeTokens (§27.5, "presentation independence") is
+// theme-tokens.js's ThemeTokens ("presentation independence") is
 // injected here — see buildSandboxHtml()'s own note on how.
 
 import { DEFAULT_THEME, themeToCssVariables } from '../presentation/theme-tokens.js';
@@ -75,8 +75,8 @@ export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens, my
     }
     // Inbound: a message the host is pushing IN, not a response to a
     // call this module made — the host initiates this (a peer sent
-    // something targeting this module's id via the real transport,
-    // §25), it is never something the module itself requests.
+    // something targeting this module's id via the real transport),
+    // it is never something the module itself requests.
     if (msg.channel === 'aiwa-peer-message') {
       for (var i = 0; i < peerMessageListeners.length; i++) peerMessageListeners[i](msg.peerId, msg.data);
     }
@@ -108,7 +108,7 @@ export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens, my
     // module read the same value back rather than guess it.
     myDomainId: ${escapedDomainId},
     // Real-time, peer-addressed — routed through the real transport
-    // (§25) to the SAME module id running on the target domain, if it
+    // to the SAME module id running on the target domain, if it
     // is currently mounted there. Not durable, not part of H_d — this
     // is interaction, not a ledger fact.
     sendToPeer: function (peerId, data) { return callHost('sendToPeer', [peerId, data]); },
@@ -118,7 +118,7 @@ export function buildSandboxHtml(moduleCode, moduleId, themeCss, themeTokens, my
     // this sandbox never holds and never will — the host signs, after
     // the module only ever REQUESTS. Nothing about which claim moves
     // where is decided by ctx; conservation-bridge.js's own signature
-    // check is what actually authorizes it (§7, Appendix H.18).
+    // check is what actually authorizes it.
     transferClaim: function (claimId, toDomainId) { return callHost('transferClaim', [claimId, toDomainId]); },
     // General-purpose: posts ANY event type to this domain's own H_d.
     // Deliberately the ONLY primitive a genuinely new kind of causal
@@ -241,7 +241,7 @@ export async function mountModule(container, entry, code, verifyFn, hostHandlers
     /**
      * Pushes an inbound peer message INTO this already-mounted module —
      * the host-initiated counterpart to ctx.sendToPeer(). Called by
-     * main.js when a real transport message (§25) arrives tagged for
+     * main.js when a real transport message arrives tagged for
      * this exact module id while it happens to be the one currently
      * running; if no module is mounted, or a different one is, the
      * caller simply doesn't call this — there's no queue on this side,
