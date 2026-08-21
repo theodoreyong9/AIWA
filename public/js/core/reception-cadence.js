@@ -183,12 +183,21 @@ export function deriveSourceEpochLookup(orderedEvents) {
 
   return (sourceDomain, eventId) => {
     const target = byId.get(eventId);
-    if (!target || target.payload?.domain !== sourceDomain) return null;
+    if (!target || target.payload?.domain !== sourceDomain) return null; // genuinely does not exist, or misattributed — the only real rejection case
 
     if (target.payload?.type === 'cadence' && Number.isInteger(target.payload.epoch)) {
       return target.payload.epoch;
     }
 
+    // Any other real, correctly-attributed event of this domain is a
+    // legitimate fact to reference — identity registration, an early
+    // accrual, anything — whether or not the domain has advanced its
+    // cadence yet. A real event found with NO cadence ancestors is not
+    // "nonexistent"; it is this domain's own real epoch-0 state, the
+    // same emergent widening of verifiable data every other real event
+    // already gets, with no special first-contact rule needed. Only a
+    // fabricated or misattributed reference — caught above — is ever
+    // rejected.
     const visited = new Set();
     const queue = [...target.parents];
     let maxEpoch = 0;
@@ -204,7 +213,7 @@ export function deriveSourceEpochLookup(orderedEvents) {
         queue.push(...event.parents);
       }
     }
-    return maxEpoch > 0 ? maxEpoch : null;
+    return maxEpoch; // real event, real domain, real position — 0 is a legitimate epoch-0 state, never treated as absence
   };
 }
 
