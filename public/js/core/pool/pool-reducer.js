@@ -212,7 +212,7 @@ import { evaluateCondition } from '../causal-condition-evaluator.js';
  * causally-ordered contribution history and the real Conservation
  * state, never a trust decision made on anyone's say-so.
  *
- * §27.8's composable-primitives prototype: this pool's structural
+ * The composable-primitives prototype: this pool's structural
  * checks (does this pot/cycle exist, is it closed, does this claim
  * belong to it) stay pool-specific glue — inherent to what a pool IS,
  * not generalizable. The final, security-critical checks — real claim
