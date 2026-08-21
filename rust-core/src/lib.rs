@@ -9,6 +9,7 @@ mod identity;
 mod modules;
 mod pool_reducer;
 mod public_profile_reducer;
+mod reception_cadence;
 
 pub use conservation::{
     apply_conservation_event, identity_derivation, materialize_conservation, Claim, ClaimStatus,
@@ -27,6 +28,7 @@ pub use causal_condition_evaluator::{evaluate_condition, Condition, EvaluationCo
 pub use pool_reducer::{compute_weighted_draw, pot_address, verify_pool_payout, Contribution, Cycle, Draw, PoolConfig, PoolRejection, PoolState};
 pub use generic_contract_reducer::{substitute_placeholders, verify_generic_release, GenericContract, GenericContractRejection, GenericContractState};
 pub use public_profile_reducer::{published_data_for_domain, PublicProfileState, PublishedValue};
+pub use reception_cadence::{ReceptionCadenceState, ReceptionCommitment, ReceptionKind, ReceptionRejection, ReceivedRef, SourceEpochLookup};
 pub use identity::{
     apply_identity_event, derive_domain_id, materialize_identity, short_domain_label,
     verify_burn_proof, Commitment, IdentityCostState, NormalizedBurnTx, RegisterResult,
