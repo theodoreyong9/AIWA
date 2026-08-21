@@ -170,10 +170,25 @@ export function updateModuleCode(state, { id, codeHash, codeUrl }) {
  * @param {string} id
  * @param {import('./module-registry.js').AuditStatus} status
  */
+const VALID_AUDIT_STATUSES = ['unaudited', 'passed', 'red-listed'];
+
+/**
+ * SECURITY/PARITY: previously accepted any string as `status` with no
+ * validation at all (enum membership was only enforced in a JSDoc
+ * comment) — Rust's own set_audit_status() already required a real
+ * AuditStatus enum member. Given an identical 'module-audit' event,
+ * the two languages could materialize different auditStatus values,
+ * a real cross-language divergence found by direct inspection, not
+ * hypothetical. Fixed to validate the same closed set Rust's own enum
+ * defines.
+ */
 export function setAuditStatus(state, id, status) {
   const existing = state.modules[id];
   if (!existing) {
     return { state, accepted: false, reason: `module id '${id}' is not registered` };
+  }
+  if (!VALID_AUDIT_STATUSES.includes(status)) {
+    return { state, accepted: false, reason: `'${status}' is not a valid audit status — must be one of ${VALID_AUDIT_STATUSES.join(', ')}` };
   }
   return { state: { modules: { ...state.modules, [id]: { ...existing, auditStatus: status } } }, accepted: true };
 }
