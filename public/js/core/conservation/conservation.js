@@ -1,7 +1,7 @@
-// conservation.js — Conservation, per §6.1 and §7: proof-carrying
-// transfer/transmutation of an EXISTING claim, structurally distinct
-// from accrual (economics/, which creates new value from nothing
-// consumed — see §6.2). Protocol:
+// conservation.js — Conservation: proof-carrying transfer/
+// transmutation of an EXISTING claim, structurally distinct from
+// accrual (economics/, which creates new value, not consumed from
+// anything existing). Protocol:
 //
 //   Deactivate → Prove → Verify → Consume → Activate
 //
@@ -12,14 +12,14 @@
 // pipeline; a transfer is simply a transmutation whose derivation
 // function is the identity function.
 //
-// The load-bearing invariant, stated in §7 and reproduced exactly here:
+// The load-bearing invariant:
 //
 //   count(Consume(p)) ≤ 1
 //
 // enforced by consume() below via a persisted, atomically-checked
 // consumed-proof set — the same idempotent-set technique the ledger
-// itself uses for event deduplication (§8), applied here to proofs
-// instead of events.
+// itself uses for event deduplication, applied here to proofs instead
+// of events.
 
 /**
  * @typedef {{ id: string, kind: string, amount: number, owner: string, status: 'active'|'deactivated'|'consumed' }} Claim
@@ -63,7 +63,7 @@ export function deactivate(state, claimId) {
 
 /**
  * A deterministic, unique-by-construction proof id. Unlike the ledger's
- * event ids (§8.1), this does not need to be a cryptographic hash of
+ * own event ids, this does not need to be a cryptographic hash of
  * content to prevent forgery — Proof(x, A, B, n, θ, f)'s own n is
  * already specified as a unique identifier by the protocol; the id here
  * is literally that tuple, not an independently-derived commitment.
@@ -114,11 +114,11 @@ export function proveTransfer(state, { claimId, from, to, n, derivation }, deriv
 
 /**
  * Step 3: Verify. Pure, side-effect-free, and safe to call more than
- * once — §7 explicitly distinguishes "verified twice" (fine) from
- * "consumed twice" (a double-spend). Re-derives the expected output
- * from the claim and the same authorized derivation function, so a
- * proof claiming an output the function would not actually produce is
- * rejected rather than trusted at face value.
+ * once — verifying twice is fine; only consuming twice is a double-
+ * spend. Re-derives the expected output from the claim and the same
+ * authorized derivation function, so a proof claiming an output the
+ * function would not actually produce is rejected rather than trusted
+ * at face value.
  *
  * @returns {{ valid: boolean, reason?: string }}
  */
@@ -144,15 +144,11 @@ export function verify(state, proof, derivations) {
 }
 
 /**
- * Step 4: Consume. THE load-bearing invariant of §7:
- * count(Consume(p)) ≤ 1. Direct port of the whitepaper's reference
- * pseudocode (the "Wallet consumption guard (§7)" block in Appendix B —
- * note: §7's body text cites this as "Appendix B.7", but the formally
- * numbered B.7 is actually "Merge identifier (replay guard)", a related
- * but distinct mechanism for H_E ∪ H_M merge replay protection, not
- * this one; the wallet consumption guard pseudocode has no numbered
- * sub-letter of its own in the source document — see README.md's
- * Conservation section for this citation note).
+ * Step 4: Consume. THE load-bearing invariant:
+ * count(Consume(p)) ≤ 1. A persisted, atomically-checked consumed-
+ * proof set is the entire mechanism — a proof id, once consumed, can
+ * never be consumed again, regardless of how many times verify()
+ * itself was called against it.
  *
  * Check-then-insert as a single synchronous operation on an in-memory
  * object is atomic *within this process* by construction (JS has no
