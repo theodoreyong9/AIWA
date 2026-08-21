@@ -131,7 +131,7 @@ export class EventDag {
    * economic state via a pure reducer supplied by the caller. The DAG
    * itself never knows any economic semantics — this is the
    * replicated-state / economic-meaning separation principle from the
-   * paper (§3.1).
+   * paper.
    */
   materialize(reducer, initialState) {
     return this.topoOrder().reduce((state, ev) => reducer(state, ev), initialState);
