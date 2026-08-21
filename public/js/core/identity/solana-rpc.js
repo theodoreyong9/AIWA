@@ -16,7 +16,7 @@
 // producing the NormalizedBurnTx shape that verifyBurnProof() expects,
 // from a real transaction signature.
 //
-// Churn resistance (§24, identity-cost.js's own header): `result.slot`
+// Churn resistance (identity-cost.js's own header): `result.slot`
 // is a standard, documented field on Solana's `getTransaction` RPC
 // response — already present in the exact same parsed object this file
 // already reads `result.transaction`/`result.meta.err`/
