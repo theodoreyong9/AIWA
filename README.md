@@ -1,4 +1,3 @@
-\
 # AIWA — Autonomous Interplanetary Web Application
 
 > **A reference implementation and research platform for autonomous, delay-tolerant web applications that continue to operate during communication partitions and reconcile deterministic histories when connectivity returns.**
