@@ -73,6 +73,32 @@ jobs:
       - name: Verify conservation parity
         run: bash scripts/verify-conservation-parity.sh
 
+  submission-parity:
+    name: JS / Rust submission signature parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: npm install (test-only deps, e.g. @noble/curves)
+        run: npm install
+      - name: Verify submission parity
+        run: bash scripts/verify-submission-parity.sh
+
+  pool-parity:
+    name: JS / Rust pool draw parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify pool parity
+        run: bash scripts/verify-pool-parity.sh
+
   wasm-build:
     name: Build WASM package
     runs-on: ubuntu-latest
