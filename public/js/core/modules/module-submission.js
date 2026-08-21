@@ -30,7 +30,6 @@
 // here requires that specific wallet or requires the signer to have a
 // registered identity cost at all.
 
-import { ed25519 } from '@noble/curves/ed25519';
 import { computeModuleHash } from './module-hash.js';
 import { validateEconomicConfig } from './module-registry.js';
 
@@ -78,13 +77,23 @@ function fromHex(hex) {
  * solana-wallet.js) — any keypair may sign, not only one with a
  * registered identity cost.
  *
+ * SECURITY/AVAILABILITY: @noble/curves/ed25519 is a lazy dynamic
+ * import here, not a static top-level one — the same real bug,
+ * confirmed via real Playwright/Chromium browser testing, and the same
+ * fix, as conservation-bridge.js's buildSignedTransferEvent(); see
+ * that function's own doc comment for the full mechanism. A static
+ * import graph is linked before any of a module's own top-level code
+ * runs, so an unreachable CDN would otherwise hang the whole
+ * application before main.js's own startup, including its own
+ * main().catch() safety net, ever ran — with zero catchable error.
  * @param {Omit<SubmissionEvent, 'nonce'|'timestamp'|'signerPubkey'|'signature'>} fields
  * @param {Uint8Array} signerSeed
  * @param {Uint8Array} signerPubkeyBytes
  * @param {{ now?: number, nonce?: string }} [opts]
- * @returns {SubmissionEvent}
+ * @returns {Promise<SubmissionEvent>}
  */
-export function buildSubmissionEvent(fields, signerSeed, signerPubkeyBytes, { now = Date.now(), nonce } = {}) {
+export async function buildSubmissionEvent(fields, signerSeed, signerPubkeyBytes, { now = Date.now(), nonce } = {}) {
+  const { ed25519 } = await import('@noble/curves/ed25519');
   const withMeta = { ...fields, nonce: nonce ?? crypto.randomUUID(), timestamp: now };
   const message = new TextEncoder().encode(canonicalSubmissionMessage(withMeta));
   const signature = ed25519.sign(message, signerSeed);
@@ -95,9 +104,10 @@ export function buildSubmissionEvent(fields, signerSeed, signerPubkeyBytes, { no
  * Pure signature check — no network. Mirror of validate.js's
  * verifySignature() step, adapted to Ed25519/@noble/curves.
  * @param {SubmissionEvent} event
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
-export function verifySubmissionSignature(event) {
+export async function verifySubmissionSignature(event) {
+  const { ed25519 } = await import('@noble/curves/ed25519');
   const message = new TextEncoder().encode(canonicalSubmissionMessage(event));
   try {
     return ed25519.verify(fromHex(event.signature), message, fromHex(event.signerPubkey));
@@ -126,7 +136,7 @@ export async function validateSubmission(submissionState, event, code) {
   if (submissionState.usedNonces[event.nonce]) {
     return { valid: false, reason: `nonce ${event.nonce} already used — replay rejected` };
   }
-  if (!verifySubmissionSignature(event)) {
+  if (!(await verifySubmissionSignature(event))) {
     return { valid: false, reason: 'invalid signature — event does not match signerPubkey' };
   }
   const actualHash = await computeModuleHash(code);
