@@ -1,19 +1,16 @@
-// identity-cost.js — a concrete c_id mechanism (§24.6.ii-adjacent: a
-// sunk, unrecoverable cost, paid once before partition), backing the
-// "committed resource" question directly: one identity is admitted
-// only once it presents proof of an irrecoverable SOL burn on Solana
+// identity-cost.js — a concrete c_id mechanism (a sunk, unrecoverable
+// cost, paid once before partition): one identity is admitted only
+// once it presents proof of an irrecoverable SOL burn on Solana
 // mainnet, sent to the network's well-known incinerator address.
 //
-// Why burn, not bond/stake (§24.6.i vs §24.6.ii, discussed at length
-// with the user before writing this file): a bonded deposit's
-// protection depends on slashing being *enforced* after misbehavior is
-// detected — under an arbitrarily long partition, that enforcement may
-// never propagate in time, and the paper says so explicitly: "the
-// usable floor during a partition of length T shrinks as T grows,
-// exactly the opposite of what a designer might hope." A burn has no
+// Why burn, not bond/stake: a bonded deposit's protection depends on
+// slashing being *enforced* after misbehavior is detected — under an
+// arbitrarily long partition, that enforcement may never propagate in
+// time, and the usable floor during a partition of length T shrinks as
+// T grows, the opposite of what a designer would want. A burn has no
 // such dependency: the cost is sunk the moment it's paid, with nothing
-// left to enforce later. That is a better fit for a protocol whose
-// entire premise is that "later" may never come during the period that
+// left to enforce later — a better fit for a protocol whose entire
+// premise is that "later" may never come during the period that
 // matters.
 //
 // This file contains ONLY the pure, testable verification and
@@ -22,32 +19,31 @@
 // to Solana (untestable in this environment — see solana-rpc.js) is a
 // separate, thin adapter that produces this normalized shape.
 //
-// Churn resistance (§24, Sybil re-derivation, Result 2): re-deriving
-// the Sybil analysis with the real Proof-of-Will formula (not the
-// earlier power-law) found a genuinely new attack the old formula never
-// had — periodically abandoning an aged domain for a freshly registered
-// one, since reward.js's own domain-local age term (a necessary
-// adaptation avoiding a cross-domain synchronized clock, see that
-// file's header) resets to near-zero at zero cost beyond the ordinary
-// identity burn. Closed here, not in the reward formula: the required
-// burn for a NEW registration is now a function of real, deployment-
-// wide elapsed time — the real Solana slot the burn landed at (already
-// present in every burn-verification RPC response, previously read and
-// discarded — see solana-rpc.js), compared against a single fixed
-// deployment constant (genesisSlot, agreed once, exactly like
-// alpha/beta/gamma/C/minQ already are). This needs no live "current
-// time" oracle, ever: the delta is computable purely locally once both
-// numbers are known, inheriting the exact trust model §24.6(v) already
-// documents for burn verification generally — the domain broadcasting
-// a burn has strong assurance (it queried Solana's RPC directly); a
-// domain later learning of it via merge() trusts the folded claim
-// unless it separately re-verifies the embedded signature itself.
-// Optional and deployment-configured, never mandatory-by-default: the
-// late-joiner tradeoff (a legitimate newcomer years into a mature
-// deployment pays the same escalated cost as a churn attempt would)
-// is a real, unresolved policy question a deployment must decide, not
-// something this file should prescribe an answer to by making the
-// curve unconditional.
+// Churn resistance: re-deriving the Sybil analysis with the real
+// Proof-of-Will formula (not the earlier power-law) found a genuinely
+// new attack the old formula never had — periodically abandoning an
+// aged domain for a freshly registered one, since reward.js's own
+// domain-local age term (a necessary adaptation avoiding a cross-
+// domain synchronized clock) resets to near-zero at zero cost beyond
+// the ordinary identity burn. Closed here, not in the reward formula:
+// the required burn for a NEW registration is now a function of real,
+// deployment-wide elapsed time — the real Solana slot the burn landed
+// at (already present in every burn-verification RPC response,
+// previously read and discarded — see solana-rpc.js), compared
+// against a single fixed deployment constant (genesisSlot, agreed once,
+// exactly like alpha/beta/gamma/C/minQ already are). This needs no
+// live "current time" oracle, ever: the delta is computable purely
+// locally once both numbers are known, inheriting the same trust model
+// already used for burn verification generally — the domain
+// broadcasting a burn has strong assurance (it queried Solana's RPC
+// directly); a domain later learning of it via merge() trusts the
+// folded claim unless it separately re-verifies the embedded signature
+// itself. Optional and deployment-configured, never mandatory-by-
+// default: the late-joiner tradeoff (a legitimate newcomer years into
+// a mature deployment pays the same escalated cost as a churn attempt
+// would) is a real, unresolved policy question a deployment must
+// decide, not something this file should prescribe an answer to by
+// making the curve unconditional.
 
 export const SOLANA_INCINERATOR_ADDRESS = '1nc1nerator11111111111111111111111111111111';
 
@@ -149,9 +145,9 @@ export function verifyBurnProof(tx, { minLamports = 0 } = {}) {
  * Registers a domain's identity cost from a verified burn. Enforces
  * that the same transaction signature can never back two different
  * identities — the same idempotent-set replay guard used everywhere
- * else in this project (§7's consume(), §10's cadence chain): a proof
- * of payment is consumed exactly once, by construction, not by
- * convention.
+ * else in this project (Conservation's own consume(), the cadence
+ * chain): a proof of payment is consumed exactly once, by
+ * construction, not by convention.
  *
  * @param {IdentityCostState} state
  * @param {{ domain: string, tx: NormalizedBurnTx, minLamports?: number, now?: number, churnConfig?: { genesisSlot: number, costCurve: (slotsSinceGenesis: number) => number } }} params
