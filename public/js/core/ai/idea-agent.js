@@ -7,7 +7,7 @@
 // registry and localStorage: a domain's real registered/pinned modules
 // (module-registry.js, already DAG-replicated) and real contacts
 // (materialized cadence state, populated only after real reconciliation
-// through the real transport, §25) — not invented, not a separate
+// through the real transport) — not invented, not a separate
 // social layer with its own state.
 //
 // Split deliberately, matching this project's established discipline:
@@ -36,7 +36,7 @@
 /**
  * Builds a real snapshot from this domain's own materialized module
  * registry and its known contacts (domains actually merged in via
- * reconciliation, §9 — never invented, never a placeholder list).
+ * reconciliation — never invented, never a placeholder list).
  * Pure: takes already-materialized state, does no fetching itself.
  *
  * Deepened, this revision, after the earlier version was found to be
@@ -269,7 +269,7 @@ export function buildIdeaSystemPrompt(snapshot) {
     `- This domain's own registered modules: ${myModuleNames}`,
     `- ${pinnedLine}`,
     `- ${publishedLine}`,
-    `- Modules seen from ${contactCount} known contact domain${contactCount === 1 ? '' : 's'} (only domains actually reconciled with, §9)`,
+    `- Modules seen from ${contactCount} known contact domain${contactCount === 1 ? '' : 's'} (only domains actually reconciled with)`,
     `- Most common module categories across the whole known network (all-time): ${topCategories}`,
     `- TRENDING categories (among only the most recently registered modules network-wide): ${trendingLine}`,
     `- CATEGORY GAPS (categories this domain's own contacts have, that this domain itself has none of): ${gapsLine}`,
