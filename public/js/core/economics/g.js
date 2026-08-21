@@ -1,8 +1,7 @@
-// g.js — the full materialized economic view, A = G(H_d, θ), per §9–13.
-// Composes the three reducers built in Phases 1–3 (cadence.js,
-// reward.js, scarcity.js) into one fold over a topologically-ordered
-// event list. This module adds no new economic rule of its own — it is
-// purely the composition.
+// g.js — the full materialized economic view, A = G(H_d, θ).
+// Composes three reducers (cadence.js, reward.js, scarcity.js) into
+// one fold over a topologically-ordered event list. This module adds
+// no new economic rule of its own — it is purely the composition.
 //
 // θ here is { reward: { alpha, beta, gamma, C, minQ }, budgets: { [domain]: number|null } }
 // — the real Proof-of-Will reward structure (reward.js), not the
@@ -11,25 +10,22 @@
 // Event types recognized:
 //   - 'cadence': delegated entirely to cadence.js's reducer.
 //   - 'accrual': { domain, b, q0, T } — a claim of committed resource b
-//     at acceptance epoch q0, with caller-chosen patience rate T (§10's
-//     reward.js; clamped to [0, 0.4] inside reward() itself, so an
-//     out-of-range or missing T here is not rejected — it is folded
-//     through unchanged and clamped at the point of use, matching the
-//     original formula's own Math.min(tr,40)/100 behavior). q is
-//     derived from the domain's current cadence epoch *as folded so
-//     far*, never from any external clock (§10). qTotal (this domain's
-//     own total epoch count — reward.js's domain-local stand-in for the
-//     original's global "protocol age," see reward.js's header) is read
-//     from the same folded cadence state. The requested reward is
-//     computed and then handed to the scarcity reducer, which may clamp
-//     it; only the clamped, *issued* amount is added to the domain's
-//     balance.
+//     at acceptance epoch q0, with caller-chosen patience rate T
+//     (clamped to [0, 0.4] inside reward() itself, so an out-of-range
+//     or missing T here is not rejected — it is folded through
+//     unchanged and clamped at the point of use). q is derived from
+//     the domain's current cadence epoch as folded so far, never from
+//     any external clock. qTotal (this domain's own total epoch count
+//     — reward.js's domain-local stand-in for a global "protocol age")
+//     is read from the same folded cadence state. The requested reward
+//     is computed and then handed to the scarcity reducer, which may
+//     clamp it; only the clamped, issued amount is added to the
+//     domain's balance.
 //   - anything else (e.g. 'genesis'): passed through unchanged.
 //
-// Lemma 1 (§11) note: unchanged from the prior revision — an accrual
-// event's payload still always carries q0, which is still what the
-// strong-identity guarantee rests on. T's addition to the payload only
-// strengthens this: two claims differing only in patience rate are now
+// An accrual event's payload always carries q0, which the strong-
+// identity guarantee rests on. T's presence in the payload only
+// strengthens this: two claims differing only in patience rate are
 // also distinguishable by id, not merely by q0.
 
 import { initialCadenceState, applyCadenceEvent } from './cadence.js';
@@ -77,7 +73,7 @@ export function applyGEvent(theta, state, event) {
   }
 
   if (payload.type === 'claim-issue') {
-    // Bridges G's fungible balance to Conservation's claims (§6.1/§7):
+    // Bridges G's fungible balance to Conservation's claims:
     // converts part of a domain's accrued balance into a spendable,
     // uniquely-identified claim. This reducer only debits the balance —
     // creating the actual Claim record is conservation.js's
