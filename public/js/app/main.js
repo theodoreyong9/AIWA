@@ -56,6 +56,7 @@ import { getTheme, DEFAULT_THEME_ID } from '../core/presentation/theme-tokens.js
 import { loadVerifiedModuleCode } from '../core/modules/module-loader.js';
 import { verifyModuleIntegrity } from '../core/modules/module-hash.js';
 import { vdfSeed, computeVdfChain } from '../core/economics/cadence-vdf.js';
+import { deriveSourceEpochLookup, materializeReceptionCadence } from '../core/reception-cadence.js';
 
 const WALLET_STORAGE_PREFIX = 'aiwa-wallet-';
 const DESKTOP_PIN_PREFIX = 'aiwa-desktop-pins-';
@@ -117,7 +118,7 @@ async function simulatedNetworkSend(fromId, toId, payload) {
     // a different one) is mounted there right now, the message is
     // simply not seen — there is no inbound queue on the receiving
     // side, matching real-time interaction semantics, not durable
-    // delivery (§25's delay-tolerant transport still guarantees the
+    // delivery — the delay-tolerant transport still guarantees the
     // OUTER send() itself was queued if the link was down; what
     // happens once delivered is this app's own dispatch policy).
     to.handleInboundModuleMessage?.(fromId, payload.moduleId, payload.data);
@@ -140,13 +141,20 @@ class DomainReplica {
     this.lastEventId = null;
     this.lastCadenceId = null;
     this.lastCadenceVdfOutput = null; // R11 — the previous epoch's own real VDF chain output, seeds the next one
+    // Local-only bookkeeping (never durable protocol state, exactly
+    // like this project's other in-memory caches) for
+    // reception-cadence.js's mandatory per-tick commitment: which
+    // foreign (non-self) events this replica has already committed to
+    // having received, so each new tick's commitment only ever reports
+    // the real, new delta since the last one.
+    this.committedForeignEventIds = new Set();
     this.epoch = 0;
     this.pending = [];
     this.activeFormulaId = GENESIS_FORMULA_ID; // local choice, not DAG state — see mintFormula()'s header
     this.transport = createDelayTolerantTransport((peerId, payload) => simulatedNetworkSend(this.id, peerId, payload));
     this.watchdog = createConnectionWatchdog({
       timeoutMs: 15000,
-      onStale: () => log(`[${this.id}] connection watchdog: no activity for 15s — a real deployment would tear down and reinitialize the transport here (§25)`),
+      onStale: () => log(`[${this.id}] connection watchdog: no activity for 15s — a real deployment would tear down and reinitialize the transport here`),
     });
     allDomains.set(id, this);
   }
@@ -172,8 +180,8 @@ class DomainReplica {
    * see cadence-vdf.js's own header. This is real, felt cost by
    * design, not a UX inconvenience to optimize away: the delay IS the
    * security property. cadenceVdfIterations is a per-deployment
-   * config value (Parameters screen), matching §16.1's own stated
-   * discipline that difficulty should never be a hardcoded constant.
+   * config value (Parameters screen) — difficulty should never be a
+   * hardcoded constant.
    */
   async advanceCadence() {
     const nextEpoch = this.epoch + 1;
@@ -185,6 +193,37 @@ class DomainReplica {
     this.lastCadenceVdfOutput = vdfOutput;
     this.lastEventId = id;
     this.epoch = nextEpoch;
+    await this.postReceptionCommitment(nextEpoch);
+    return id;
+  }
+
+  /**
+   * reception-cadence.js's mandatory per-tick commitment: at every real
+   * cadence tick, this domain signs a real, verifiable claim about
+   * what foreign (non-self) events it has newly become aware of since
+   * its last commitment — empty if nothing new, full with the real
+   * delta otherwise. Turns Sybil-cluster maintenance into a recurring,
+   * ongoing cost rather than a one-time registration burn — see that
+   * file's own header for the full rationale and honest scope limits.
+   */
+  async postReceptionCommitment(epoch) {
+    const newForeign = this.dag.topoOrder()
+      .filter((e) => e.payload?.domain && e.payload.domain !== this.id && !this.committedForeignEventIds.has(e.id))
+      .map((e) => ({ sourceDomain: e.payload.domain, eventId: e.id }));
+
+    const kind = newForeign.length > 0 ? 'full' : 'empty';
+    const { ed25519 } = await import('@noble/curves/ed25519');
+    const sorted = [...newForeign].sort((a, b) => (a.sourceDomain + a.eventId).localeCompare(b.sourceDomain + b.eventId));
+    const message = new TextEncoder().encode(JSON.stringify({ domain: this.id, epoch, kind, receivedFrom: sorted }));
+    const signature = ed25519.sign(message, this.keypair.secretKey.slice(0, 32));
+    const toHex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+    const id = await this.dag.addEvent([this.lastEventId], {
+      type: 'reception-commit', domain: this.id, epoch, kind, receivedFrom: newForeign,
+      signature: toHex(signature), signerPubkey: toHex(this.keypair.publicKey.toBytes()),
+    });
+    this.lastEventId = id;
+    for (const ref of newForeign) this.committedForeignEventIds.add(ref.eventId);
     return id;
   }
 
@@ -229,7 +268,7 @@ class DomainReplica {
    * lastEventId as a single parent, so leaving it at genesis after
    * restoring real history would silently branch new events off the
    * very start, orphaning everything already accrued. Real, tested
-   * state (cadence's own domains[id].lastId, §10) is used to recover
+   * state (cadence's own domains[id].lastId) is used to recover
    * the true tip, not a guess.
    */
   restoreTipsFromDag() {
@@ -248,7 +287,7 @@ class DomainReplica {
   materializeFormulas() { return materializeFormulas(this.dag.topoOrder()); }
 
   /** The active formula's params — 'genesis' (the real Proof-of-Will
-   * constants, §10) unless this domain has switched to a minted one. */
+   * constants) unless this domain has switched to a minted one. */
   currentRewardParams() {
     const registry = this.materializeFormulas();
     return registry.formulas[this.activeFormulaId] ?? GENESIS_FORMULA_PARAMS;
@@ -286,14 +325,15 @@ class DomainReplica {
   /**
    * Two-phase materialization, not circular despite the mutual
    * dependency it looks like at first: pool state needs Conservation's
-   * real claim ownership to verify contributions are real (§
+   * real claim ownership to verify contributions are real (see
    * pool-reducer.js's own header — the general causal-contract
    * primitive a real community jackpot is one application of, not what
    * this mechanism is specifically for); Conservation needs pool state
-   * (and, since §27.9's own last-mile work, generic-contract state too)
-   * to verify 'pot-release' events. Resolved the same way every other
-   * cross-reducer dependency in this project is — an explicit, ordered
-   * pass, not a hidden import: (1) materialize Conservation with no
+   * (and, since the generic-contract last-mile work, generic-contract
+   * state too) to verify 'pot-release' events. Resolved the same way
+   * every other cross-reducer dependency in this project is — an
+   * explicit, ordered pass, not a hidden import: (1) materialize
+   * Conservation with no
    * pot-release verifier at all (the safe default — every pot-release
    * is rejected, so this first pass simply excludes any payouts that
    * haven't happened yet); (2) materialize pool state AND generic-
@@ -329,8 +369,14 @@ class DomainReplica {
     return materializeConservation(events, verifyPotRelease);
   }
 
-  /** The generic-contract view alone — a plugin defining a new permissionless contract (§27.9) reads this to see its own minted condition. */
+  /** The generic-contract view alone — a plugin defining a new permissionless contract reads this to see its own minted condition. */
   materializeGenericContracts() { return materializeGenericContracts(this.dag.topoOrder()); }
+
+  /** The reception-cadence view — real, signed per-tick commitments and any real rejections (forged references, monotonicity violations). */
+  async materializeReceptionCadence() {
+    const events = this.dag.topoOrder();
+    return materializeReceptionCadence(events, deriveSourceEpochLookup(events));
+  }
 
   /** The pool view alone — most callers (a plugin's own UI, e.g. the jackpot example) want this directly, not Conservation's full state. */
   async materializePool() {
@@ -365,17 +411,16 @@ class DomainReplica {
 
 // ── Global state ────────────────────────────────────────────────────
 
-let theta = { budgets: {} }; // .reward removed — see currentRewardParams(); §10's constants now live at formula id 'genesis', not here
-let activeThemeId = DEFAULT_THEME_ID; // §27.5 presentation independence — a display preference, never DAG state
+let theta = { budgets: {} }; // .reward removed — see currentRewardParams(); reward constants now live at formula id 'genesis', not here
+let activeThemeId = DEFAULT_THEME_ID; // presentation independence — a display preference, never DAG state
 // R11: real, felt cost by design (cadence-vdf.js) — a per-deployment
-// difficulty value, not a hardcoded constant (§16.1's own stated
-// discipline). ~240ms on typical hardware at this default; a real
-// deployment sizes this against its own target epoch duration and
-// hardware, exactly like §16.1 already discusses for the heartbeat
-// interval Δ.
+// difficulty value, not a hardcoded constant. ~240ms on typical
+// hardware at this default; a real deployment sizes this against its
+// own target epoch duration and hardware, the same discipline already
+// used for the heartbeat interval Δ.
 let cadenceVdfIterations = 200000;
-// §24 churn resistance: deployment-wide, real-slot-indexed identity
-// cost (identity-cost.js's own header has the full rationale). OFF by
+// Churn resistance: deployment-wide, real-slot-indexed identity cost
+// (identity-cost.js's own header has the full rationale). OFF by
 // default — this is a genuine, unresolved policy question (a legitimate
 // late joiner years into a mature deployment pays the same escalated
 // cost a churn attempt would), not something this reference
@@ -383,11 +428,11 @@ let cadenceVdfIterations = 200000;
 // deployment that wants it configures genesisSlot + lamportsPerSlot in
 // Parameters.
 let identityChurnConfig = null;
-// §28's deepened idea agent: real, GitHub-sourced trend data
+// The idea agent's real, GitHub-sourced trend data
 // (scripts/fetch-github-trends.mjs's bot output, committed to
 // data/github-trends.json). Fetched once, lazily, cached here — never
 // awaited inside a render function, matching this project's own
-// "delayed, never blocked" discipline (§7): the idea agent works
+// "delayed, never blocked" discipline: the idea agent works
 // identically whether this fetch has resolved yet, failed, or never
 // runs at all (a partition, an offline build, a fresh clone before the
 // bot's first scheduled run) — it just falls back to null, exactly
@@ -403,7 +448,7 @@ function loadExternalTrendsOnce() {
     .catch(() => { /* offline, partitioned, or file genuinely absent — cachedExternalTrends simply stays null, never blocks anything */ });
 }
 
-// §28's idea agent, further deepened at the user's own direct request
+// The idea agent's context, deepened at the user's own direct request
 // after seeing a real YourMine pattern-mining system (mine-patterns.js
 // / ym-spec.json) and asking for AIWA's own equivalent: which real ctx
 // primitives already-registered modules actually use, mined from real,
@@ -652,7 +697,7 @@ async function runModule(entry) {
      * module only ever names WHICH claim and WHERE — it cannot forge
      * the `from`, since the signature itself is what proves control,
      * exactly as conservation-bridge.js already requires for every
-     * transfer regardless of source (§7, Appendix H.18).
+     * transfer regardless of source.
      */
     async onTransferClaim(moduleId, claimId, toDomainId) {
       const seed = myDomain.keypair.secretKey.slice(0, 32);
@@ -961,7 +1006,7 @@ function renderDomainScreen() {
     row.className = 'catalog-row';
     const isPinned = pinned.has(m.id);
     const schemeLabel = m.identityScheme ? (m.identityScheme === 'strong' ? '🔒 strong id' : '🔓 weak id') : 'non-issuing';
-    row.innerHTML = `<div class="catalog-icon">${m.icon || '⬡'}</div><div class="catalog-info"><div class="catalog-name">${m.name}</div><div class="catalog-meta">rank ${m.rank.toFixed(2)} · ${m.auditStatus} · <span title="§11's Lemma 1: strong id required whenever this module's own reward is time-sensitive; weak id is cheaper and safe only when it isn't.">${schemeLabel}</span></div></div><button data-id="${m.id}">${isPinned ? '− Remove' : '+ Add'}</button>`;
+    row.innerHTML = `<div class="catalog-icon">${m.icon || '⬡'}</div><div class="catalog-info"><div class="catalog-name">${m.name}</div><div class="catalog-meta">rank ${m.rank.toFixed(2)} · ${m.auditStatus} · <span title="Strong id required whenever this module's own reward is time-sensitive; weak id is cheaper and safe only when it isn't.">${schemeLabel}</span></div></div><button data-id="${m.id}">${isPinned ? '− Remove' : '+ Add'}</button>`;
     row.querySelector('button').addEventListener('click', async () => { togglePin(myDomain.id, m.id); await renderAll(); });
     listEl.appendChild(row);
   }
@@ -1028,7 +1073,7 @@ function renderContactsScreen() {
       const published = publishedDataForDomain(myDomain.materializePublicProfiles(), d);
       const moduleIds = Object.keys(published);
       if (moduleIds.length === 0) {
-        panel.innerHTML = '<p class="hint">This domain has published nothing publicly (§27.2/hyperprofile) — or you have not reconciled with it recently enough to see it.</p>';
+        panel.innerHTML = '<p class="hint">This domain has published nothing publicly (hyperprofile) — or you have not reconciled with it recently enough to see it.</p>';
         return;
       }
       panel.innerHTML = moduleIds.map((moduleId) => {
@@ -1069,7 +1114,7 @@ function renderParametersScreen() {
   warnEl.className = config.isRealCost ? 'mainnet' : '';
   warnEl.innerHTML = config.isRealCost
     ? '⚠️ Mainnet mode: burns use <strong>real SOL</strong> and are <strong>irreversible</strong>.'
-    : 'Devnet mode: burns use free faucet SOL and provide <strong>no real Sybil resistance</strong> (§24).';
+    : 'Devnet mode: burns use free faucet SOL and provide <strong>no real Sybil resistance</strong>.';
 
   if (myDomain) {
     const formulaRegistry = myDomain.materializeFormulas();
@@ -1169,7 +1214,7 @@ async function reconcileWithTestPeer(peerId) {
   const mineFromPeer = peer.materialize().balances[myDomain.id] ?? 0;
   const converged = mineFromMine === mineFromPeer;
   log(`Reconciled with test peer '${peerId}' via transport (${myDomain.dag.size} events on both sides now).`);
-  log(converged ? 'Convergence check passed: both replicas agree (§9).' : 'Convergence check FAILED — bug.');
+  log(converged ? 'Convergence check passed: both replicas agree.' : 'Convergence check FAILED — bug.');
   await renderAll();
 }
 
@@ -1182,7 +1227,7 @@ async function flushPendingSync() {
 
 // ── Submission ────────────────────────────────────────────────────
 
-// ── AI idea agent (§28, deliberately scoped to only this) ───────────
+// ── AI idea agent (deliberately scoped to only this) ───────────
 // No cancel-mid-generation path exists yet — the streamChat generator
 // itself supports an injected stop signal (webllm-engine.js), but
 // nothing in this UI currently produces one. Recorded as an honest gap
@@ -1267,7 +1312,7 @@ async function submitPluginCode() {
     const alpha = parseFloat(document.getElementById('submit-alpha').value);
     const scarcityPolicy = document.getElementById('submit-scarcity').value.trim();
     // identityCostMechanism is derived, not typed: whether THIS domain
-    // actually has a verified burn right now — matching §24.1's real
+    // actually has a verified burn right now — matching the real
     // requirement (a genuine identity cost, not a self-declared label).
     const identityCostMechanism = hasIdentityCost(myDomain.materializeIdentity(), myDomain.id) ? 'sol-burn' : null;
     economicConfig = { alpha, identityCostMechanism, scarcityPolicy: scarcityPolicy || null };
@@ -1374,7 +1419,7 @@ async function main() {
   document.getElementById('network-select').addEventListener('change', renderAll);
   document.getElementById('theme-select').addEventListener('change', (e) => {
     activeThemeId = e.target.value; // local display preference — deliberately never touches theta, myDomain, or any DAG state
-    log(`Presentation switched to '${activeThemeId}' — no module, rank, or economic state changed (§27.5).`);
+    log(`Presentation switched to '${activeThemeId}' — no module, rank, or economic state changed.`);
   });
   document.getElementById('cadence-vdf-iterations').addEventListener('change', (e) => {
     const n = parseInt(e.target.value, 10);
@@ -1387,14 +1432,14 @@ async function main() {
     const enabled = document.getElementById('churn-config-enabled').value === 'on';
     if (!enabled) {
       identityChurnConfig = null;
-      log('Identity churn resistance disabled — no real-slot-indexed cost curve enforced (§24).');
+      log('Identity churn resistance disabled — no real-slot-indexed cost curve enforced.');
       return;
     }
     const genesisSlot = parseInt(document.getElementById('churn-genesis-slot').value, 10);
     const lamportsPerSlot = parseInt(document.getElementById('churn-lamports-per-slot').value, 10);
     if (!Number.isInteger(genesisSlot) || !Number.isInteger(lamportsPerSlot) || lamportsPerSlot < 0) return;
     identityChurnConfig = { genesisSlot, costCurve: linearCostCurve({ baseLamports: 0, lamportsPerSlot }) };
-    log(`Identity churn resistance enabled — genesis slot ${genesisSlot}, ${lamportsPerSlot} lamports/slot (§24, a deployment policy choice, not a prescribed default).`);
+    log(`Identity churn resistance enabled — genesis slot ${genesisSlot}, ${lamportsPerSlot} lamports/slot (a deployment policy choice, not a prescribed default).`);
   };
   document.getElementById('churn-config-enabled').addEventListener('change', updateChurnConfig);
   document.getElementById('churn-genesis-slot').addEventListener('change', updateChurnConfig);
@@ -1446,7 +1491,7 @@ async function main() {
     if (!myDomain) return;
     const msgEl = document.getElementById('mint-msg');
     if (!hasIdentityCost(myDomain.materializeIdentity(), myDomain.id)) {
-      msgEl.textContent = 'Requires a registered identity — minting a formula is a real economic object, gated the same way as issuing a module (§24.1).';
+      msgEl.textContent = 'Requires a registered identity — minting a formula is a real economic object, gated the same way as issuing a module.';
       msgEl.className = 'msg error';
       return;
     }
