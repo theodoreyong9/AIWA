@@ -1,4 +1,4 @@
-// module-submission.js — the actual submission pipeline §27's registry
+// module-submission.js — the actual submission pipeline the registry
 // needed and didn't have: a signed, replay-protected claim binding a
 // module id to a specific code hash, checked against the REAL fetched
 // bytes before ever registering — not registerModule() trusting a
@@ -160,7 +160,7 @@ export async function validateSubmission(submissionState, event, code) {
  * Marks a nonce as consumed. Called only after a submission has been
  * fully accepted (validated AND registered) — the same
  * idempotent-set replay-guard pattern used everywhere else in this
- * project (§7's consume(), identity-cost.js's usedSignatures).
+ * project (Conservation's own consume(), identity-cost.js's usedSignatures).
  */
 export function recordNonce(submissionState, nonce) {
   return { ...submissionState, usedNonces: { ...submissionState.usedNonces, [nonce]: true } };
@@ -216,7 +216,7 @@ export async function submitModule(registryState, submissionState, event, code, 
   // codeUrl regardless of who registered it, while the displayed
   // `author` field stayed the original author's — an attacker's code,
   // credited to someone who never touched it. New registration stays
-  // exactly as open as before (no author allow-list, §27.4) — this
+  // exactly as open as before (no author allow-list) — this
   // check applies only once a module id already exists.
   if (alreadyRegistered && registryState.modules[event.moduleId].author !== event.signerPubkey) {
     return {
