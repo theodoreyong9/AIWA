@@ -1,17 +1,17 @@
-// scarcity.js — scarcity policies over issuance, per §13. This module
-// implements the two simplest of the four policies discussed in the
-// paper (§13.1 and its "Unbounded" control from Appendix D.1 / H.4):
+// scarcity.js — scarcity policies over issuance. This module
+// implements the two simplest of the policies discussed in the paper:
 //
-//   - unbounded  (budget = null): no clamp, issuance grows without bound
+//   - unbounded (budget = null): no clamp, issuance grows without bound
 //     as T -> infinity. This is the control case the paper uses to show
-//     what §13.1 is protecting against, not a recommended policy.
-//   - preallocated budget (§13.1): B_d(epoch); a domain issues freely
-//     until its allocation is exhausted, then stops. Autonomy holds
-//     until exhaustion — after that, this specific domain can no longer
-//     autonomously issue, which is the trade-off §13.1 states plainly.
+//     what a real budget policy protects against, not a recommended
+//     policy.
+//   - preallocated budget: B_d(epoch); a domain issues freely until its
+//     allocation is exhausted, then stops. Autonomy holds until
+//     exhaustion — after that, this specific domain can no longer
+//     autonomously issue.
 //
-// Rate limits (§13.2) and expiring rights (§13.3) are out of scope here
-// (v2, per the README's development plan).
+// Rate limits and expiring rights are out of scope here (v2, per the
+// README's development plan).
 
 /**
  * @typedef {{ used: number, budget: number | null }} DomainScarcityState
@@ -37,7 +37,7 @@ export function initialScarcityState(domainBudgets) {
  * issued — the caller (e.g. the reward reducer, once composed in Phase
  * 4) uses `issued`, not the requested `amount`, as the real accrual.
  *
- * Mirrors the exact clamping logic of Appendix H.4's reference Python
+ * Mirrors the exact clamping logic of the paper's own reference Python
  * simulation (`add_e = min(rho_e, budget_e-used_e) if used_e < budget_e
  * else 0.0`), generalized from two hardcoded domains to any number.
  *
@@ -62,12 +62,12 @@ export function applyIssuanceAttempt(state, domain, amount) {
 }
 
 /**
- * Reproduces Appendix H.4's simulation loop generically: for each
+ * Reproduces the paper's own simulation loop generically: for each
  * domain, attempts to issue `rho` once per hour, for `hours` hours,
  * recording total and per-domain issuance at each hour in
  * `snapshotHours`. Used to cross-check this implementation against the
- * paper's own worked numbers (Appendix D.1, Appendix H.4) — not merely
- * asserted to match, but actually recomputed and diffed.
+ * paper's own worked numbers — not merely asserted to match, but
+ * actually recomputed and diffed.
  *
  * @param {{ name: string, rho: number, budget: number | null }[]} domains
  * @param {number} hours
