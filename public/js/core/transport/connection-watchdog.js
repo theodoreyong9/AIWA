@@ -1,4 +1,4 @@
-// connection-watchdog.js — §25's required component: a connection can
+// connection-watchdog.js — a required component: a connection can
 // silently go stale (an ICE connection transitioning to disconnected
 // without a WebRTC stack attempting restart, especially after a
 // network change) without ever firing a peer-leave event. The watchdog
