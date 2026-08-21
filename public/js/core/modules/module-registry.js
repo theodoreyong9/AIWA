@@ -1,16 +1,16 @@
-// module-registry.js — §27 module registry: registration is open by
+// module-registry.js — module registry: registration is open by
 // design (no permission, no gatekeeping to publish — anyone can
 // register any module at any time), but registration still validates
-// the two things §27.2 makes mandatory, both already backed by real
-// code elsewhere in this project rather than asserted in prose:
+// two things, both already backed by real code elsewhere in this
+// project rather than asserted in prose:
 //
 //   1. Economic self-declaration: a module that issues accrual must
-//      declare whether its reward is time-sensitive (§11, Lemma 1 —
-//      the runtime derives the strong/weak identity scheme from this
+//      declare whether its reward is time-sensitive (the runtime
+//      derives the strong/weak identity scheme from this
 //      automatically) and its economic config (α, identity-cost
-//      mechanism, scarcity policy). §24.1's real finding is enforced
-//      here, not just described: α ≤ 1 with no identity-cost mechanism
-//      has an unbounded splitting incentive, and is rejected.
+//      mechanism, scarcity policy). This is enforced here, not just
+//      described: α ≤ 1 with no identity-cost mechanism has an
+//      unbounded splitting incentive, and is rejected.
 //   2. Content integrity (module-hash.js): a registration binds an id
 //      to a specific code hash, not a mutable URL.
 //
@@ -56,13 +56,13 @@ export function initialModuleRegistryState() {
 }
 
 /**
- * §11/§27.2: the runtime does not ask a module author to pick an
- * identity scheme — it derives the minimum sufficient one from the
- * one fact that actually determines it (Lemma 1): whether the module's
- * reward function is sensitive to elapsed cadence time. A module that
- * declares itself time-insensitive gets the cheaper weak scheme
- * automatically; nothing stronger is forced on it, and nothing weaker
- * is permitted if it declared time-sensitivity.
+ * The runtime does not ask a module author to pick an identity scheme
+ * — it derives the minimum sufficient one from the one fact that
+ * actually determines it: whether the module's reward function is
+ * sensitive to elapsed cadence time. A module that declares itself
+ * time-insensitive gets the cheaper weak scheme automatically; nothing
+ * stronger is forced on it, and nothing weaker is permitted if it
+ * declared time-sensitivity.
  *
  * @param {boolean} timeSensitive
  * @returns {IdentityScheme}
@@ -72,7 +72,7 @@ export function selectIdentityScheme(timeSensitive) {
 }
 
 /**
- * §24.1, enforced rather than only described: with reward concave or
+ * Enforced rather than only described: with reward concave or
  * linear in committed capital (α ≤ 1) and no identity-cost mechanism,
  * splitting into many identities is non-decreasing in profit and
  * reward concavity alone gives no bound — a module configured this way
@@ -92,7 +92,7 @@ export function validateEconomicConfig(config) {
   if (config.alpha <= 1 && !config.identityCostMechanism) {
     return {
       valid: false,
-      reason: 'alpha <= 1 with no identity-cost mechanism has an unbounded splitting incentive (§24.1) — declare an identityCostMechanism or raise alpha above 1',
+      reason: 'alpha <= 1 with no identity-cost mechanism has an unbounded splitting incentive — declare an identityCostMechanism or raise alpha above 1',
     };
   }
   if (!config.scarcityPolicy) {
@@ -107,7 +107,7 @@ export function validateEconomicConfig(config) {
  * mechanical: a duplicate id, or (for an issuing module only) an
  * internally-inconsistent economic declaration per validateEconomicConfig.
  * A non-issuing module (isIssuing: false) skips economic validation
- * entirely and registers in read-only mode, exactly as §27.2 specifies.
+ * entirely and registers in read-only mode.
  *
  * @param {ModuleRegistryState} state
  * @param {Omit<ModuleEntry, 'identityScheme' | 'auditStatus' | 'registeredAt'>} entry
