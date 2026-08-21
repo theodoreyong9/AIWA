@@ -347,7 +347,8 @@ AIWA/
 │           ├── event-dag-persistence.js
 │           ├── ledger-bridge.js
 │           ├── wasm-ledger-adapter.js
-│           ├── domain-id.js
+│           ├── causal-condition-evaluator.js
+│           ├── generic-contract-reducer.js
 │           ├── economics/
 │           │   ├── cadence.js
 │           │   ├── cadence-vdf.js
@@ -359,6 +360,7 @@ AIWA/
 │           │   ├── conservation.js
 │           │   └── conservation-bridge.js
 │           ├── identity/
+│           │   ├── domain-id.js
 │           │   ├── identity-cost.js
 │           │   ├── identity-cost-reducer.js
 │           │   ├── solana-networks.js
@@ -380,10 +382,8 @@ AIWA/
 │           │   └── connection-watchdog.js
 │           ├── pool/
 │           │   └── pool-reducer.js
-│           ├── contracts/
-│           │   └── generic-contract-reducer.js
-│           ├── verification/
-│           │   └── causal-condition-evaluator.js
+│           ├── profile/
+│           │   └── public-profile-reducer.js
 │           ├── presentation/
 │           │   └── theme-tokens.js
 │           ├── desktop/
@@ -391,8 +391,7 @@ AIWA/
 │           └── ai/
 │               ├── idea-agent.js
 │               ├── webllm-engine.js
-│               ├── module-pattern-miner.js
-│               └── public-profile-reducer.js
+│               └── module-pattern-miner.js
 ├── rust-core/
 │   ├── src/
 │   ├── examples/
@@ -403,7 +402,7 @@ AIWA/
 ├── examples/
 │   └── jackpot-plugin/
 ├── docs/
-│   └── AIWA_whitepaper.md
+│   └── AIWA_WHITEPAPER.md
 ├── package.json
 └── .github/workflows/
     ├── ci.yml
@@ -917,6 +916,8 @@ claim.owner == from
 
 is not sufficient because a peer could otherwise declare another domain as its own source.
 
+The Ed25519 verification dependency (`@noble/curves/ed25519`) is loaded via a lazy, cached dynamic import inside the functions that need it, not a static top-level import. A static import graph is fetched and linked before any of a module's own top-level code runs; if the CDN this dependency resolves through were ever unreachable, a static import would fail before `main.js`'s own startup code -- including its own top-level error handling -- ever executed, hanging the application with no catchable error. The dynamic import makes an unreachable CDN an ordinary, catchable rejected promise instead.
+
 ## Atomic consumption
 
 The consumption guard must be atomic from the perspective of the state transition.
@@ -1041,6 +1042,8 @@ The host:
 6. applies registration or update.
 
 The caller therefore cannot submit one hash while silently mounting another file.
+
+Like `conservation-bridge.js`'s own transfer signing, the same Ed25519 dependency here is a lazy, cached dynamic import rather than a static top-level one, for the identical reason: a static import of an unreachable CDN dependency would silently hang the whole application before it ever started, with no catchable error.
 
 ## Registry replication
 
@@ -1200,6 +1203,8 @@ A real example is a 2-of-2 escrow represented as a `count` condition over approv
 
 The contract mechanism is independent of the pool reducer.
 
+**Known scope difference, not a security gap:** the JS reducer validates a condition's structural shape less strictly than Rust at mint time — a malformed condition (an unknown primitive type, a missing required field) can be accepted by JS's own `generic-contract-init` handler where Rust's own parser would reject it outright. This is safe in practice because it is caught at the other end regardless: the shared evaluator (`causal-condition-evaluator.js` / `causal_condition_evaluator.rs`) rejects an unrecognized or malformed condition at evaluation time in both languages identically, so a contract minted with a malformed condition in JS can never actually release anything — it is permanently, harmlessly inert, not exploitable.
+
 ---
 
 # 24. Pools
@@ -1317,7 +1322,7 @@ The idea agent can use:
 - GitHub repository trends explicitly marked as external inspiration;
 - local module-pattern usage.
 
-The agent produces suggestions.
+The agent produces suggestions -- text a human reads, never code. Module-pattern mining deliberately stops at frequency data (which real `ctx` primitives existing modules use, and which are never used at all) rather than producing code skeletons or templates; code generation is an explicit, repeatedly-confirmed non-goal of this project's AI layer, not an oversight.
 
 It does not:
 
@@ -1608,16 +1613,17 @@ cd rust-core
 cargo test
 
 cd ..
-./scripts/verify-parity.sh
-./scripts/verify-g-parity.sh
-./scripts/verify-conservation-parity.sh
-./scripts/verify-submission-parity.sh
+bash scripts/verify-parity.sh
+bash scripts/verify-g-parity.sh
+bash scripts/verify-conservation-parity.sh
+bash scripts/verify-submission-parity.sh
+bash scripts/verify-pool-parity.sh
 ```
 
 Current reference counts:
 
 ```text
-415 JS tests
+416 JS tests
 238 Rust tests
 0 compiler warnings in the reported reference run
 ```
