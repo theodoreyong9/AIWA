@@ -1,6 +1,6 @@
-// theme-tokens.js — closes a real gap: §27.5 states "a presentation
+// theme-tokens.js — closes a real gap: a presentation
 // layer cannot alter module behavior — only how a module's output is
-// displayed," and names this as specifically relevant to interplanetary
+// displayed — and this matters specifically for interplanetary
 // deployments ("a bandwidth- or hardware-constrained settlement may
 // need a radically different presentation of identical underlying
 // state, without every module needing to be rewritten to support it").
@@ -41,7 +41,7 @@ export const DEFAULT_THEME = {
 };
 
 /**
- * §27.5's own stated case: a bandwidth- or hardware-constrained
+ * A real, stated case: a bandwidth- or hardware-constrained
  * settlement. Larger text (cheaper displays, more distance-viewing),
  * higher-contrast, minimal color palette (fewer bytes if a module
  * renders anything as an image, less to reason about on constrained
