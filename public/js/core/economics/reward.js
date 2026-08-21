@@ -1,12 +1,12 @@
-// reward.js — the accrual reward function, per §10, now adopting the
-// real Proof-of-Will formula the user's own prior work uses (YourMine's
-// mine.js, calcClaimable()), not this project's earlier, simpler
-// power-law r = K·b^α·q^β. Standard form:
+// reward.js — the accrual reward function, adopting the real Proof-of-
+// Will formula the user's own prior work uses (YourMine's mine.js,
+// calcClaimable()), not this project's earlier, simpler power-law
+// r = K·b^α·q^β. Standard form:
 //
 //   r(b, q, qTotal, T) = (b · q^α) / [ln(qTotal^(β(1−T)) + C)]^γ
 //
 // Two adaptations from the original are deliberate, not incidental,
-// both because AIWA domains never share a global clock (§9) while the
+// both because AIWA domains never share a global clock while the
 // original — a single Solana program every participant reads slots
 // from — assumes one:
 //
@@ -14,22 +14,22 @@
 //     fixed global reference block, identical for every participant)
 //     is this DOMAIN'S OWN total cadence epoch count here, not a
 //     quantity shared across domains. Requiring every AIWA domain to
-//     agree on one global reference epoch would reintroduce exactly
-//     the cross-domain synchronization dependency §9 rules out. Using
-//     each domain's own age preserves the formula's intent — reward
-//     per action shrinks as a domain matures — without any domain
-//     needing to know anything about any other domain's clock.
+//     agree on one global reference epoch would reintroduce the exact
+//     cross-domain synchronization dependency this architecture rules
+//     out. Using each domain's own age preserves the formula's intent
+//     — reward per action shrinks as a domain matures — without any
+//     domain needing to know anything about any other domain's clock.
 //   - The original enforces a minimum wait of 30 Solana slots
 //     (~12 seconds) before any reward is claimable. AIWA's epoch is a
-//     coarser, deployment-defined unit (§10), not a fixed ~400ms slot,
-//     so the literal number 30 would carry no equivalent meaning here.
+//     coarser, deployment-defined unit, not a fixed ~400ms slot, so the
+//     literal number 30 would carry no equivalent meaning here.
 //     Replaced with `minQ`, a deployment-chosen minimum epoch count,
 //     defaulting to 1 (some non-zero cadence time must actually pass).
 //
-// b, q, and qTotal must be finite and >= 0 by construction (§10); q = 0
-// still yields 0 whenever alpha > 0 for b > 0, the same "no instant
-// reward" property the original power-law form had — cadence-derived
-// economic time still governs, only the shape of the curve changed.
+// b, q, and qTotal must be finite and >= 0 by construction; q = 0 still
+// yields 0 whenever alpha > 0 for b > 0, the same "no instant reward"
+// property the original power-law form had — cadence-derived economic
+// time still governs, only the shape of the curve changed.
 
 export class RewardError extends Error {}
 
