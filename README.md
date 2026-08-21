@@ -30,44 +30,44 @@ The project separates replicated history, deterministic state materialization, e
   - [8. Economics](#8-economics)
   - [9. Cadence](#9-cadence)
   - [10. Cadence VDF / sequential hash chain](#10-cadence-vdf--sequential-hash-chain)
-  - [11. Formula registry](#11-formula-registry)
-  - [12. Scarcity and autonomous issuance](#12-scarcity-and-autonomous-issuance)
-  - [13. Sybil resistance](#13-sybil-resistance)
+  - [11. Reception cadence](#11-reception-cadence) · [12. Formula registry](#12-formula-registry)
+  - [13. Scarcity and autonomous issuance](#13-scarcity-and-autonomous-issuance)
+  - [14. Sybil resistance](#14-sybil-resistance)
 - **PART IV — IDENTITY, CONSERVATION AND VALUE FLOW**
-  - [14. Identity](#14-identity)
-  - [15. Conservation](#15-conservation)
+  - [15. Identity](#15-identity)
+  - [16. Conservation](#16-conservation)
 - **PART V — NETWORK, TRANSPORT AND EXTENSIBILITY**
-  - [16. Transport](#16-transport)
-  - [17. WebRTC](#17-webrtc)
-  - [18. Modules](#18-modules)
-  - [19. Module ranking](#19-module-ranking)
-  - [20. Sandbox](#20-sandbox)
-  - [21. Module API](#21-module-api)
+  - [17. Transport](#17-transport)
+  - [18. WebRTC](#18-webrtc)
+  - [19. Modules](#19-modules)
+  - [20. Module ranking](#20-module-ranking)
+  - [21. Sandbox](#21-sandbox)
+  - [22. Module API](#22-module-api)
 - **PART VI — CAUSAL APPLICATION PRIMITIVES**
-  - [22. Causal verification](#22-causal-verification)
-  - [23. Generic contracts](#23-generic-contracts)
-  - [24. Pools](#24-pools)
+  - [23. Causal verification](#23-causal-verification)
+  - [24. Generic contracts](#24-generic-contracts)
+  - [25. Pools](#25-pools)
 - **PART VII — APPLICATION LAYERS AND IMPLEMENTATIONS**
-  - [25. Presentation](#25-presentation)
-  - [26. Desktop](#26-desktop)
-  - [27. Hyperprofile](#27-hyperprofile)
-  - [28. AI assistance](#28-ai-assistance)
-  - [29. GitHub trends](#29-github-trends)
-  - [30. Rust and WASM](#30-rust-and-wasm)
-  - [31. Cross-language parity](#31-cross-language-parity)
+  - [26. Presentation](#26-presentation)
+  - [27. Desktop](#27-desktop)
+  - [28. Hyperprofile](#28-hyperprofile)
+  - [29. AI assistance](#29-ai-assistance)
+  - [30. GitHub trends](#30-github-trends)
+  - [31. Rust and WASM](#31-rust-and-wasm)
+  - [32. Cross-language parity](#32-cross-language-parity)
 - **PART VIII — FAILURE MODES AND SECURITY**
-  - [32. Counterexamples](#32-counterexamples)
-  - [33. Threat model](#33-threat-model)
-  - [34. Security boundaries](#34-security-boundaries)
-  - [35. What remains unresolved](#35-what-remains-unresolved)
-  - [36. Adversarial test matrix](#36-adversarial-test-matrix)
+  - [33. Counterexamples](#33-counterexamples)
+  - [34. Threat model](#34-threat-model)
+  - [35. Security boundaries](#35-security-boundaries)
+  - [36. What remains unresolved](#36-what-remains-unresolved)
+  - [37. Adversarial test matrix](#37-adversarial-test-matrix)
 - **PART IX — OPERATIONS, BUILD AND DEPLOYMENT**
-  - [37. Running tests](#37-running-tests)
-  - [38. Building Rust → WASM](#38-building-rust--wasm)
-  - [39. GitHub Pages deployment](#39-github-pages-deployment)
-  - [40. Participation](#40-participation)
+  - [38. Running tests](#38-running-tests)
+  - [39. Building Rust → WASM](#39-building-rust--wasm)
+  - [40. GitHub Pages deployment](#40-github-pages-deployment)
+  - [41. Participation](#41-participation)
 - **PART X — CONCLUSION AND RESEARCH DIRECTION**
-  - [41. Bottom line](#41-bottom-line)
+  - [42. Bottom line](#42-bottom-line)
   - [Forkability beyond open source](#forkability-beyond-open-source)
   - [From decentralization to global interoperability](#from-decentralization-to-global-interoperability)
   - [Programmable applications](#programmable-applications)
@@ -689,9 +689,11 @@ The correct description is:
 
 The reference default is approximately 200,000 iterations, with the exact duration depending on hardware.
 
-## Reception cadence (mandatory per-tick commitment)
+---
 
-The VDF mechanism above bounds how fast a single domain can advance its own cadence. It does not, by itself, check anything about what a domain claims to have received from OTHER domains. A separate, additional mechanism closes that gap.
+# 11. Reception cadence
+
+The cadence VDF (§10) bounds how fast a single domain can advance its own cadence. It says nothing about what a domain claims to have received from OTHER domains — a distinct, additional mechanism, not a refinement of the same one.
 
 At every real cadence tick, a domain signs a commitment declaring either:
 
@@ -716,7 +718,7 @@ This does not prove that two domains are distinct real-world entities — that i
 
 ---
 
-# 11. Formula registry
+# 12. Formula registry
 
 Reward parameters are registered immutably.
 
@@ -736,7 +738,7 @@ The current active formula selection is separate from the permanent existence of
 
 ---
 
-# 12. Scarcity and autonomous issuance
+# 13. Scarcity and autonomous issuance
 
 Autonomous issuance has a fundamental systems constraint.
 
@@ -775,7 +777,7 @@ The architecture does not claim that one scarcity policy is universally correct.
 
 ---
 
-# 13. Sybil resistance
+# 14. Sybil resistance
 
 The reward formula alone is not a complete Sybil analysis.
 
@@ -834,7 +836,7 @@ The implementation also studies identity churn: abandoning an aging identity and
 
 ---
 
-# 14. Identity
+# 15. Identity
 
 AIWA's reference identity is:
 
@@ -884,7 +886,7 @@ This is a damping mechanism, not proof that churn is impossible.
 
 ---
 
-# 15. Conservation
+# 16. Conservation
 
 Conservation is deliberately separated from issuance.
 
@@ -941,7 +943,7 @@ claim.owner == from
 
 is not sufficient because a peer could otherwise declare another domain as its own source.
 
-The Ed25519 verification dependency (`@noble/curves/ed25519`) is loaded via a lazy, cached dynamic import inside the functions that need it, not a static top-level import. A static import graph is fetched and linked before any of a module's own top-level code runs; if the CDN this dependency resolves through were ever unreachable, a static import would fail before `main.js`'s own startup code -- including its own top-level error handling -- ever executed, hanging the application with no catchable error. The dynamic import makes an unreachable CDN an ordinary, catchable rejected promise instead.
+The Ed25519 verification dependency (`@noble/curves/ed25519`) is loaded via a lazy, cached dynamic import inside the functions that need it, not a static top-level import. A static import graph is fetched and linked before any of a module's own top-level code runs; if the CDN this dependency resolves through were ever unreachable, a static import would fail before `main.js`'s own startup code — including its own top-level error handling — ever executed, hanging the application with no catchable error. The dynamic import makes an unreachable CDN an ordinary, catchable rejected promise instead.
 
 ## Atomic consumption
 
@@ -961,7 +963,7 @@ The invariant is therefore not merely "the verifier rejects bad proofs." It is:
 
 ---
 
-# 16. Transport
+# 17. Transport
 
 The transport layer is an interface.
 
@@ -999,7 +1001,7 @@ This keeps the transport boundary real even in the single-browser demonstration.
 
 ---
 
-# 17. WebRTC
+# 18. WebRTC
 
 A real WebRTC mesh backend requires signaling.
 
@@ -1028,7 +1030,7 @@ Both ultimately deliver events to the same history layer.
 
 ---
 
-# 18. Modules
+# 19. Modules
 
 Modules are third-party code.
 
@@ -1080,7 +1082,7 @@ It is therefore replicated through the same merge mechanism rather than being an
 
 ---
 
-# 19. Module ranking
+# 20. Module ranking
 
 The rank is derived from the author's identity cost and cadence:
 
@@ -1098,7 +1100,7 @@ This is intentional: ranking a module and deciding where a user pinned it are di
 
 ---
 
-# 20. Sandbox
+# 21. Sandbox
 
 The reference module runner uses:
 
@@ -1138,7 +1140,7 @@ Therefore:
 
 ---
 
-# 21. Module API
+# 22. Module API
 
 The reference context includes:
 
@@ -1172,7 +1174,7 @@ A message is delivered only when the target module is currently mounted.
 
 ---
 
-# 22. Causal verification
+# 23. Causal verification
 
 AIWA provides six declarative primitives:
 
@@ -1199,7 +1201,7 @@ This is important because a third-party contract should describe a condition rat
 
 ---
 
-# 23. Generic contracts
+# 24. Generic contracts
 
 ### JavaScript smart contracts
 
@@ -1232,7 +1234,7 @@ The contract mechanism is independent of the pool reducer.
 
 ---
 
-# 24. Pools
+# 25. Pools
 
 The pool primitive supports:
 
@@ -1262,7 +1264,7 @@ JS and Rust produce matching:
 
 ---
 
-# 25. Presentation
+# 26. Presentation
 
 The presentation layer is not part of consensus.
 
@@ -1290,7 +1292,7 @@ The design system uses:
 
 ---
 
-# 26. Desktop
+# 27. Desktop
 
 Desktop arrangement is pure, DOM-free logic.
 
@@ -1310,7 +1312,7 @@ Corrupt layout data degrades to an empty state rather than crashing the applicat
 
 ---
 
-# 27. Hyperprofile
+# 28. Hyperprofile
 
 The public profile reducer is a DAG-replicated key/value view.
 
@@ -1332,7 +1334,7 @@ A Contact can therefore inspect information a domain has genuinely published rat
 
 ---
 
-# 28. AI assistance
+# 29. AI assistance
 
 AIWA's AI layer is intentionally non-authoritative.
 
@@ -1347,7 +1349,7 @@ The idea agent can use:
 - GitHub repository trends explicitly marked as external inspiration;
 - local module-pattern usage.
 
-The agent produces suggestions -- text a human reads, never code. Module-pattern mining deliberately stops at frequency data (which real `ctx` primitives existing modules use, and which are never used at all) rather than producing code skeletons or templates; code generation is an explicit, repeatedly-confirmed non-goal of this project's AI layer, not an oversight.
+The agent produces suggestions — text a human reads, never code. Module-pattern mining deliberately stops at frequency data (which real `ctx` primitives existing modules use, and which are never used at all) rather than producing code skeletons or templates; code generation is an explicit, repeatedly-confirmed non-goal of this project's AI layer, not an oversight.
 
 It does not:
 
@@ -1384,7 +1386,7 @@ The browser execution path is real code but is not fully testable under the Node
 
 ---
 
-# 29. GitHub trends
+# 30. GitHub trends
 
 The daily trend file is generated through the official GitHub public repository search API.
 
@@ -1412,7 +1414,7 @@ It must never be interpreted as AIWA network activity.
 
 ---
 
-# 30. Rust and WASM
+# 31. Rust and WASM
 
 The Rust implementation mirrors the protocol logic.
 
@@ -1432,7 +1434,7 @@ The current remaining validation item is a live side-by-side browser comparison 
 
 ---
 
-# 31. Cross-language parity
+# 32. Cross-language parity
 
 Parity is checked for:
 
@@ -1452,7 +1454,7 @@ Numeric semantics, protocol versioning, and a formal conformance suite remain op
 
 ---
 
-# 32. Counterexamples
+# 33. Counterexamples
 
 AIWA retains deliberately broken variants.
 
@@ -1505,7 +1507,7 @@ for all events that can be merged under that identity.
 
 ---
 
-# 33. Threat model
+# 34. Threat model
 
 The principal adversaries are:
 
@@ -1545,7 +1547,7 @@ parity / regression test
 
 ---
 
-# 34. Security boundaries
+# 35. Security boundaries
 
 AIWA distinguishes:
 
@@ -1585,7 +1587,7 @@ None of these properties automatically implies the others.
 
 ---
 
-# 35. What remains unresolved
+# 36. What remains unresolved
 
 The major open questions are:
 
@@ -1601,13 +1603,13 @@ The major open questions are:
 10. **Quantitative calibration of identity cost and Sybil economics.**
 11. **Formalization of the finality / intention research vocabulary.**
 12. **Live WASM-vs-JS browser equivalence.**
-13. **Collusion in reception commitments.** Reception consistency (§34) catches a domain whose own claims contradict each other, or contradict a genuinely independent counterparty's real history. It does not, and structurally cannot, catch a pair or cluster that fabricates a mutually-consistent reception history together from the start — no purely relational check, with no external anchor, can rule that out.
+13. **Collusion in reception commitments.** Reception consistency (§35) catches a domain whose own claims contradict each other, or contradict a genuinely independent counterparty's real history. It does not, and structurally cannot, catch a pair or cluster that fabricates a mutually-consistent reception history together from the start — no purely relational check, with no external anchor, can rule that out.
 
 These are not hidden defects in the documentation. They are the research boundary.
 
 ---
 
-# 36. Adversarial test matrix
+# 37. Adversarial test matrix
 
 | Attack | Property sought |
 |---|---|
@@ -1633,7 +1635,7 @@ These are not hidden defects in the documentation. They are the research boundar
 
 ---
 
-# 37. Running tests
+# 38. Running tests
 
 ```bash
 npm install
@@ -1662,7 +1664,7 @@ Test counts are evidence about the checked implementation, not proof of complete
 
 ---
 
-# 38. Building Rust → WASM
+# 39. Building Rust → WASM
 
 ```bash
 rustup target add wasm32-unknown-unknown
@@ -1679,7 +1681,7 @@ CI builds the binary automatically.
 
 ---
 
-# 39. GitHub Pages deployment
+# 40. GitHub Pages deployment
 
 Configure GitHub Pages to use GitHub Actions.
 
@@ -1689,7 +1691,7 @@ The application itself has no server dependency and no application build step.
 
 ---
 
-# 40. Participation
+# 41. Participation
 
 AIWA is intentionally open to technical criticism.
 
@@ -1777,7 +1779,7 @@ This remains a research direction, not a claim of automatic universal interopera
 
 ---
 
-# 41. Bottom line
+# 42. Bottom line
 
 AIWA is best understood as:
 
