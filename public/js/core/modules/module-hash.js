@@ -1,4 +1,4 @@
-// module-hash.js — content-addressed integrity for module code, §27.
+// module-hash.js — content-addressed integrity for module code.
 //
 // The gap this closes, found by inspecting a real prior implementation
 // (a permissive registry that re-fetches a *mutable* URL on every
@@ -8,8 +8,8 @@
 // lives at this URL". Content-addressing doesn't add any publishing
 // friction (the whole point of staying maximally open, per the
 // project's stated philosophy) — it only makes an already-published
-// judgment tamper-evident going forward, the same way §8.1 already made
-// event identity tamper-evident for the ledger.
+// judgment tamper-evident going forward, the same way event identity is
+// already tamper-evident for the ledger.
 
 /**
  * SHA-256 of the module's raw source text, as a lowercase hex string.
