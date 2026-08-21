@@ -3,15 +3,15 @@
 // primitives, composed as plain data (AND/OR/NOT), so a genuinely new
 // causal contract can compose EXISTING, already-audited checks without
 // ever needing a new reducer file or touching module-sandbox.js's own
-// security boundary. §27.8 closed HALF this problem — ctx.postCausalEvent
-// / ctx.queryCausalState let any module post or read any event type
+// security boundary. ctx.postCausalEvent / ctx.queryCausalState closed
+// HALF this problem — any module can post or read any event type
 // permissionlessly, because legitimacy has never come from which ctx
 // method was called, only from whichever reducer independently
 // verifies a given event type. What still needed a platform update
 // every time was the REDUCER half: writing new verification LOGIC.
 // This file closes that half, for verification logic expressible as a
 // composition of the primitives below — a genuinely novel primitive
-// still needs a platform update, honestly, not hidden (§4 below).
+// still needs a platform update, honestly, not hidden.
 //
 // Deliberately NOT a general-purpose interpreter. Considered and
 // explicitly rejected: a metered, sandboxed JS interpreter (real gas
