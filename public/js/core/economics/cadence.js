@@ -1,33 +1,23 @@
-// cadence.js — economic cadence epoch transitions, per §10, Definition
-// 10.1 of the whitepaper.
+// cadence.js — economic cadence epoch transitions.
 //
 // A domain's economic epoch q_d only advances through a valid cadence
 // transition: monotonic (+1 exactly), causally chained to the domain's
 // previous accepted cadence event (replay- and fork-protection), and
-// processed in the DAG's deterministic topological order (id-sorted),
-// so every replica that has the same event set reaches the same q_d —
-// this is what §9 requires of G: deterministic over the converged event
-// set alone, not over receipt order.
+// processed in deterministic topological order, so every replica with
+// the same event set reaches the same q_d.
 //
-// This module only implements the cadence-epoch state machine. It does
-// not compute reward (§10's r(b,q), see reward.js once it exists) and
-// does not enforce scarcity (§13). Those are separate reducers composed
-// together in the full G (Phase 4).
+// This module only implements the cadence-epoch state machine — reward
+// computation and scarcity enforcement are separate reducers, composed
+// together in the full G.
 //
-// Closes R11 (§17's matrix — "cadence integrity remains an unverified
-// dependency"), found by one direct question and one direct pushback:
-// asked whether the mandatory heartbeat already bounded the RATE of
-// cadence advancement, and it did not — §16.1's own text already
-// separates observability (heartbeat, detecting silence) from economic
-// time (the epoch counter), and nothing before this enforced anything
-// about how FAST an active, apparently-honest domain could advance
-// through valid, correctly-chained epochs. A domain could construct a
-// thousand structurally-valid transitions in milliseconds. Every
-// cadence transition now MUST carry a real sequential-hash-chain proof
-// (cadence-vdf.js) — real, physically-irreducible sequential compute
+// Every cadence transition must carry a real sequential-hash-chain
+// proof (cadence-vdf.js): physically-irreducible sequential compute
 // time, non-parallelizable regardless of available hardware, verified
-// by recomputation rather than trusted. See cadence-vdf.js's own header
-// for the honest scope of what this does and does not solve.
+// by recomputation rather than trusted. This bounds the RATE at which
+// a domain can advance through valid epochs — a mandatory heartbeat
+// alone only detects silence, not burst-fabricated epochs. See
+// cadence-vdf.js's own header for the honest scope of what this does
+// and does not solve.
 
 import { vdfSeed, verifyVdfChain } from './cadence-vdf.js';
 
