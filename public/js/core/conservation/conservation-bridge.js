@@ -65,7 +65,6 @@
 // arrived there through an ordinary, already-signed, already-verified
 // transfer in the first place.
 
-import { ed25519 } from '@noble/curves/ed25519';
 import { initialConservationState, issueClaim, transfer } from './conservation.js';
 import { deriveDomainId } from '../identity/domain-id.js';
 
@@ -86,11 +85,34 @@ function canonicalTransferMessage({ claimId, from, to, nonce, timestamp }) {
  * forgeable payload the vulnerability allowed. `signerSeed` is the
  * 32-byte Ed25519 seed (a wallet keypair's `secretKey.slice(0, 32)`).
  *
+ * SECURITY/AVAILABILITY: @noble/curves/ed25519 is loaded via a lazy
+ * dynamic import here, not a static top-level one — found via real
+ * Playwright/Chromium browser testing to matter concretely, not a
+ * theoretical concern: a static import graph is fetched and linked
+ * before any of a module's own top-level code runs, so when the CDN
+ * this resolves through (index.html's importmap, esm.sh) is
+ * unreachable, the failure is not a catchable JS exception — it
+ * silently prevents main.js's own top-level code, including its own
+ * main().catch() safety net, from ever executing at all. Confirmed
+ * empirically: #status stayed stuck on "Initializing…" forever with
+ * zero error surfaced, directly contradicting this project's own
+ * repeatedly-stated "delayed, never blocked" design principle. Node's
+ * test suite never caught this, since Node resolves @noble/curves from
+ * node_modules, never through the browser importmap — this class of
+ * bug is invisible to every test this project runs in Node, which is
+ * exactly why real browser testing (§ this project's own Playwright
+ * work) matters as a distinct, non-redundant verification step. The
+ * dynamic import makes an unreachable CDN an ordinary, catchable
+ * rejected promise instead — module resolution itself already caches
+ * a dynamic import()'s result after the first call, so no separate
+ * caching is needed here.
+ *
  * @param {{ claimId: string, from: string, to: string }} fields
  * @param {Uint8Array} signerSeed
  * @param {Uint8Array} signerPubkeyBytes
  */
-export function buildSignedTransferEvent(fields, signerSeed, signerPubkeyBytes, { now = Date.now(), nonce = crypto.randomUUID() } = {}) {
+export async function buildSignedTransferEvent(fields, signerSeed, signerPubkeyBytes, { now = Date.now(), nonce = crypto.randomUUID() } = {}) {
+  const { ed25519 } = await import('@noble/curves/ed25519');
   const withMeta = { ...fields, nonce, timestamp: now };
   const message = new TextEncoder().encode(canonicalTransferMessage(withMeta));
   const signature = ed25519.sign(message, signerSeed);
@@ -99,6 +121,7 @@ export function buildSignedTransferEvent(fields, signerSeed, signerPubkeyBytes, 
 }
 
 async function verifyTransferAuthorization(event) {
+  const { ed25519 } = await import('@noble/curves/ed25519');
   const message = new TextEncoder().encode(canonicalTransferMessage(event));
   const fromHex = (hex) => {
     const bytes = new Uint8Array(hex.length / 2);
