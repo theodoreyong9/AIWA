@@ -1,9 +1,9 @@
-// transport.js — the interface §25 specifies, not an implementation.
+// transport.js — the interface specified, not an implementation.
 // Nothing above this layer (identity, ledger, modules) is permitted to
 // depend on which concrete transport is active — this file exists so
 // that dependency is checkable, not just claimed in prose.
 //
-// Five methods, exactly as §25 states them: connect(roomId, appId),
+// Five methods: connect(roomId, appId),
 // send(peerId, data) with peerId=null meaning broadcast,
 // onMessage(callback), onPeerJoin(callback), onPeerLeave(callback).
 //
