@@ -12,7 +12,7 @@
 // original this is adapted from. YourMine's ym-spec.json exists
 // specifically to feed a model enough structural knowledge to
 // GENERATE new module code (skeleton_by_intent, a ctx_api reference,
-// required_methods) — §28 already confirmed, directly, more than once
+// required_methods) — already confirmed, directly, more than once
 // this session, that code generation stays outside AIWA's actual AI
 // scope. This file stops at PATTERN FREQUENCY DATA: text a human (or
 // the idea agent's own prompt) reads as inspiration, never a code
