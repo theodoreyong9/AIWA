@@ -689,6 +689,29 @@ The correct description is:
 
 The reference default is approximately 200,000 iterations, with the exact duration depending on hardware.
 
+## Reception cadence (mandatory per-tick commitment)
+
+The VDF mechanism above bounds how fast a single domain can advance its own cadence. It does not, by itself, check anything about what a domain claims to have received from OTHER domains. A separate, additional mechanism closes that gap.
+
+At every real cadence tick, a domain signs a commitment declaring either:
+
+```text
+empty   — nothing new received from any other domain since the last tick
+full    — a real, explicit list of (source domain, event id) pairs newly observed
+```
+
+This commitment is mandatory, not optional — a real signed claim at every tick, whether or not there is anything to report. Two independent properties follow from this, neither present anywhere else in the protocol:
+
+**Recurring cost.** Because cadence advancement already costs real, physically-irreducible sequential compute time (the VDF above), and a real commitment must now be signed at every one of those ticks, maintaining a Sybil cluster stops being a one-time registration cost and becomes an ongoing one: every fabricated identity must keep signing real commitments at every real tick, for as long as the fabrication needs to look legitimate.
+
+**Reception monotonicity.** For a given pair of domains (A, C), A's own successive commitments about C — ordered by A's own real epoch — must reference a non-decreasing position in C's own real, independently-recomputed history. A domain claiming, later in its own real history, to have received an EARLIER state of another domain than it itself already claimed to have seen is a genuine internal inconsistency, catchable by pure recomputation: no external clock, no position, no propagation-delay bound.
+
+Verification never trusts a claimed reference — every entry in a `full` commitment's list must resolve to a real event that genuinely exists in the claimed source domain's own real cadence chain, recomputed by walking the actual DAG, not assumed correct because it was signed.
+
+### What this does not do
+
+This does not prove that two domains are distinct real-world entities — that is identity cost's job, already separate. And it cannot, by construction, prevent a genuinely collaborating pair or cluster from fabricating a mutually-consistent reception history together from the start: a purely relational check, with no external anchor, can never rule that out. It catches an isolated liar whose own claims contradict each other or contradict an honest counterparty's real history — not collusion.
+
 ---
 
 # 11. Formula registry
@@ -1552,6 +1575,10 @@ Limits the execution context of third-party code.
 
 Makes identity creation economically observable.
 
+### Reception consistency
+
+Protects against a domain later claiming, at its own real cadence epoch, to have received an earlier state of another domain than it itself already claimed to have seen — checked by pure recomputation of successive signed commitments, with no external clock, no position, no propagation-delay bound. Does not, and cannot by construction, prove that two domains are distinct real-world entities, or prevent a genuinely collaborating pair from fabricating a mutually-consistent history together — a purely relational check with no external anchor can never rule that out.
+
 None of these properties automatically implies the others.
 
 ---
@@ -1572,6 +1599,7 @@ The major open questions are:
 10. **Quantitative calibration of identity cost and Sybil economics.**
 11. **Formalization of the finality / intention research vocabulary.**
 12. **Live WASM-vs-JS browser equivalence.**
+13. **Collusion in reception commitments.** Reception consistency (§34) catches a domain whose own claims contradict each other, or contradict a genuinely independent counterparty's real history. It does not, and structurally cannot, catch a pair or cluster that fabricates a mutually-consistent reception history together from the start — no purely relational check, with no external anchor, can rule that out.
 
 These are not hidden defects in the documentation. They are the research boundary.
 
