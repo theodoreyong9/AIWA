@@ -1,4 +1,4 @@
-// generic-contract-reducer.js — the last mile of §27.9's composability
+// generic-contract-reducer.js — the last mile of the composability
 // promise. causal-condition-evaluator.js proved the evaluator works
 // (pool-reducer.js's own verifyPoolPayout was rewritten to use it,
 // 25 pre-existing tests unchanged), but nothing let a THIRD PARTY
