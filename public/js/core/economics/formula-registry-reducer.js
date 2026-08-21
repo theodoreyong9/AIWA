@@ -1,35 +1,30 @@
 // formula-registry-reducer.js — makes θ (the reward formula's
-// parameters, reward.js's RewardParams) a real economic object instead
-// of a JS variable anyone can edit live in Parameters. Built directly
-// from the question asked: "puis-je changer la formule quand je veux ?
-// [...] ça doit être immuable" — it should, and until this file, it
-// wasn't: theta lived as a plain `let` in main.js, mutable at any time,
-// never a DAG event, meaning two domains could silently disagree on
-// what the SAME accrual event is worth. That's a fork, not a bug in
-// the normal sense — it was just never named as one.
+// parameters, reward.js's RewardParams) a real economic object, minted
+// once and immutable, instead of a JS variable anyone could edit live.
+// Without this, theta could live as a plain `let`, mutable at any
+// time, never a DAG event — meaning two domains could silently
+// disagree on what the same accrual event is worth. That is a fork,
+// not merely a bug.
 //
 // A 'formula-register' DAG event is a mint: an id bound permanently to
 // a fixed (alpha, beta, gamma, C, minQ). No update path exists, ever —
-// unlike module code (which CAN be updated, §27.4), a minted formula's
+// unlike module code, which can be updated, a minted formula's
 // parameters are fixed at birth. The same id can never be reused for
-// different parameters; a second 'formula-register' for an
-// already-minted id is rejected outright, matching the same
-// content-addressing discipline as everything else in this project
-// (§8.1) applied to an economic object instead of a ledger event or
-// module's code.
+// different parameters; a second 'formula-register' for an already-
+// minted id is rejected outright, the same content-addressing
+// discipline used everywhere else in this project, applied here to an
+// economic object instead of a ledger event or a module's code.
 //
-// The real Proof-of-Will formula this project adopted (§10) is not
-// minted through this mechanism at all — it is 'genesis', a fixed
-// protocol default available to every domain with no event and no
-// burn required, precisely to avoid a bootstrapping paradox: a domain
-// needs SOME formula to accrue anything before it could ever mint a
-// new one under real economic rules. Every OTHER formula is a genuine
-// mint, and this reducer enforces the one thing it can pure-fold
+// The real Proof-of-Will formula this project adopted is not minted
+// through this mechanism at all — it is 'genesis', a fixed protocol
+// default available to every domain with no event and no burn
+// required, precisely to avoid a bootstrapping paradox: a domain needs
+// SOME formula to accrue anything before it could ever mint a new one
+// under real economic rules. Every OTHER formula is a genuine mint,
+// and this reducer enforces the one thing it can pure-fold
 // (immutability); the burn requirement itself is enforced at the
-// application layer before a mint event is ever constructed — the same
-// division of responsibility as checkSubmissionEligibility's wiring
-// (module-submission.js): this file has no business importing
-// identity-cost.js, so it doesn't.
+// application layer before a mint event is ever constructed — this
+// file has no business importing identity-cost.js, so it doesn't.
 
 export const GENESIS_FORMULA_ID = 'genesis';
 export const GENESIS_FORMULA_PARAMS = { alpha: 1.1, beta: 2.2, gamma: 3, C: 33 ** 3, minQ: 1 };
