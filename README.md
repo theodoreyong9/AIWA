@@ -708,6 +708,8 @@ This commitment is mandatory, not optional — a real signed claim at every tick
 
 Verification never trusts a claimed reference — every entry in a `full` commitment's list must resolve to a real event that genuinely exists in the claimed source domain's own real cadence chain, recomputed by walking the actual DAG, not assumed correct because it was signed.
 
+Any real, correctly-attributed event of a domain is referenceable this way — including a domain's own identity-registration event, often its very first event, before any cadence tick has occurred. This needed no special first-contact rule: a real event with no cadence-epoch ancestors is that domain's own legitimate epoch-0 state, not an absence. An earlier version of this mechanism treated "no cadence ancestors found" the same as "does not exist," which would have rejected honest references to a domain's own earliest real history — found and corrected directly, not shipped.
+
 ### What this does not do
 
 This does not prove that two domains are distinct real-world entities — that is identity cost's job, already separate. And it cannot, by construction, prevent a genuinely collaborating pair or cluster from fabricating a mutually-consistent reception history together from the start: a purely relational check, with no external anchor, can never rule that out. It catches an isolated liar whose own claims contradict each other or contradict an honest counterparty's real history — not collusion.
