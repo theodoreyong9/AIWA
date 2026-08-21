@@ -70,6 +70,66 @@ pub struct ReceptionCadenceState {
 /// genuinely exists — the actual recompute-don't-trust check.
 pub type SourceEpochLookup<'a> = dyn Fn(&str, &str) -> Option<i64> + 'a;
 
+/// Real, DAG-native derivation of a `SourceEpochLookup` — mirror of
+/// deriveSourceEpochLookup() in reception-cadence.js. If `event_id` is
+/// itself a real 'cadence' event belonging to `source_domain`, its own
+/// epoch is authoritative; otherwise, walks the event's real ancestor
+/// chain looking for the highest-epoch 'cadence' event of that domain.
+///
+/// A real event found with no cadence ancestors is this domain's own
+/// legitimate epoch-0 state — identity registration, an early accrual,
+/// anything — not treated as absent. Only a genuinely nonexistent or
+/// misattributed event id returns None. The JS mirror originally got
+/// this distinction wrong (treating epoch-0-with-no-cadence-ancestors
+/// the same as nonexistent), found and fixed directly from a design
+/// discussion about why identity registration needs no special first-
+/// contact rule of its own — reception monotonicity already governs
+/// any real, correctly-attributed event once it can be referenced at
+/// all. Built correctly here from the start.
+pub fn derive_source_epoch_lookup<'a>(ordered_events: &'a [&'a Event]) -> impl Fn(&str, &str) -> Option<i64> + 'a {
+    const SAFETY_BOUND: usize = 10_000;
+    let by_id: HashMap<&str, &Event> = ordered_events.iter().map(|e| (e.id.as_str(), *e)).collect();
+
+    move |source_domain: &str, event_id: &str| -> Option<i64> {
+        let target = by_id.get(event_id)?;
+        let domain_matches = target.payload.get("domain").and_then(|v| v.as_str()) == Some(source_domain);
+        if !domain_matches {
+            return None; // genuinely does not exist, or misattributed — the only real rejection case
+        }
+
+        let is_cadence = target.payload.get("type").and_then(|v| v.as_str()) == Some("cadence");
+        if is_cadence {
+            if let Some(epoch) = target.payload.get("epoch").and_then(|v| v.as_i64()) {
+                return Some(epoch);
+            }
+        }
+
+        let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut queue: Vec<String> = target.parents.clone();
+        let mut max_epoch: i64 = 0;
+        while let Some(id) = queue.pop() {
+            if visited.len() >= SAFETY_BOUND {
+                break;
+            }
+            if visited.contains(&id) {
+                continue;
+            }
+            visited.insert(id.clone());
+            if let Some(event) = by_id.get(id.as_str()) {
+                let event_is_cadence = event.payload.get("type").and_then(|v| v.as_str()) == Some("cadence");
+                let event_domain_matches = event.payload.get("domain").and_then(|v| v.as_str()) == Some(source_domain);
+                if event_is_cadence && event_domain_matches {
+                    if let Some(epoch) = event.payload.get("epoch").and_then(|v| v.as_i64()) {
+                        max_epoch = max_epoch.max(epoch);
+                    }
+                }
+                queue.extend(event.parents.clone());
+            }
+        }
+        Some(max_epoch) // real event, real domain, real position — 0 is a legitimate epoch-0 state, never treated as absence
+    }
+}
+
 #[derive(Deserialize)]
 struct ReceptionCommitPayload {
     domain: Option<String>,
@@ -437,5 +497,75 @@ mod tests {
         let dishonest_rewrite = signed_commit_event("rewrite", &signing_key, &domain_a, 3, "full", vec![ReceivedRefRaw { source_domain: "c".to_string(), event_id: "c-genesis".to_string() }]);
         state.apply_event(&dishonest_rewrite, &lookup_fn(&lookup_map));
         assert_eq!(state.rejections.len(), 1, "A cannot later claim to have seen only an earlier state of C than it already, honestly, claimed to have seen");
+    }
+
+    // ── derive_source_epoch_lookup: real DAG-native epoch derivation ──
+
+    #[test]
+    fn derive_lookup_returns_the_real_epoch_when_the_target_is_a_cadence_event() {
+        let c1 = Event { id: "c1".to_string(), parents: vec![], payload: serde_json::json!({"type": "cadence", "domain": "c", "epoch": 5}) };
+        let events: Vec<&Event> = vec![&c1];
+        let lookup = derive_source_epoch_lookup(&events);
+        assert_eq!(lookup("c", "c1"), Some(5));
+    }
+
+    #[test]
+    fn derive_lookup_walks_ancestors_for_the_highest_real_cadence_epoch() {
+        let c1 = Event { id: "c1".to_string(), parents: vec![], payload: serde_json::json!({"type": "cadence", "domain": "c", "epoch": 1}) };
+        let c2 = Event { id: "c2".to_string(), parents: vec!["c1".to_string()], payload: serde_json::json!({"type": "cadence", "domain": "c", "epoch": 2}) };
+        let a1 = Event { id: "a1".to_string(), parents: vec!["c2".to_string()], payload: serde_json::json!({"type": "accrual", "domain": "c", "b": 10.0}) };
+        let events: Vec<&Event> = vec![&c1, &c2, &a1];
+        let lookup = derive_source_epoch_lookup(&events);
+        assert_eq!(lookup("c", "a1"), Some(2));
+    }
+
+    #[test]
+    fn derive_lookup_returns_none_for_misattributed_domain() {
+        let c1 = Event { id: "c1".to_string(), parents: vec![], payload: serde_json::json!({"type": "cadence", "domain": "real-owner", "epoch": 5}) };
+        let events: Vec<&Event> = vec![&c1];
+        let lookup = derive_source_epoch_lookup(&events);
+        assert_eq!(lookup("attacker-claimed-domain", "c1"), None);
+    }
+
+    #[test]
+    fn derive_lookup_returns_none_for_nonexistent_event() {
+        let events: Vec<&Event> = vec![];
+        let lookup = derive_source_epoch_lookup(&events);
+        assert_eq!(lookup("c", "never-existed"), None);
+    }
+
+    /// The real correction: a real event with no cadence ancestors is
+    /// this domain's own legitimate epoch-0 state, not an absence --
+    /// found and fixed from a direct design discussion about why
+    /// identity registration needs no special first-contact rule.
+    #[test]
+    fn derive_lookup_treats_a_real_event_with_no_cadence_ancestors_as_legitimate_epoch_zero() {
+        let g1 = Event { id: "g1".to_string(), parents: vec![], payload: serde_json::json!({"type": "genesis", "domain": "c"}) };
+        let a1 = Event { id: "a1".to_string(), parents: vec!["g1".to_string()], payload: serde_json::json!({"type": "accrual", "domain": "c", "b": 10.0}) };
+        let events: Vec<&Event> = vec![&g1, &a1];
+        let lookup = derive_source_epoch_lookup(&events);
+        assert_eq!(lookup("c", "a1"), Some(0), "a real event of a domain that has not advanced cadence yet is epoch 0, never rejected as fabricated");
+    }
+
+    #[test]
+    fn derive_lookup_handles_a_domains_own_identity_register_event_as_its_first_ever_real_fact() {
+        let reg_c = Event { id: "reg-c".to_string(), parents: vec![], payload: serde_json::json!({"type": "identity-register", "domain": "c", "signature": "sig1", "burnedLamports": 1000, "slot": 500}) };
+        let events: Vec<&Event> = vec![&reg_c];
+        let lookup = derive_source_epoch_lookup(&events);
+        assert_eq!(lookup("c", "reg-c"), Some(0), "referencing a domain's own real first event works out of the box, no special first-contact rule needed");
+    }
+
+    #[test]
+    fn end_to_end_a_can_honestly_reference_cs_very_first_event_without_a_false_rejection() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let domain_a = derive_domain_id(&signing_key.verifying_key().to_bytes());
+        let reg_c = Event { id: "reg-c".to_string(), parents: vec![], payload: serde_json::json!({"type": "identity-register", "domain": "c", "signature": "sig1", "burnedLamports": 1000, "slot": 500}) };
+        let events: Vec<&Event> = vec![&reg_c];
+        let real_lookup = derive_source_epoch_lookup(&events);
+
+        let commit = signed_commit_event("e1", &signing_key, &domain_a, 1, "full", vec![ReceivedRefRaw { source_domain: "c".to_string(), event_id: "reg-c".to_string() }]);
+        let mut state = ReceptionCadenceState::new();
+        state.apply_event(&commit, &real_lookup);
+        assert_eq!(state.rejections.len(), 0, "A honestly referencing C's real first event must never be rejected as if it were fabricated");
     }
 }
