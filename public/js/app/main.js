@@ -356,7 +356,7 @@ class DomainReplica {
     let id = await this.dag.addEvent([this.lastEventId], { type: 'claim-issue', domain: this.id, id: claimId, amount });
     const seed = this.keypair.secretKey.slice(0, 32);
     const pubkeyBytes = this.keypair.publicKey.toBytes();
-    const transferEvent = buildSignedTransferEvent({ claimId, from: this.id, to: toDomainId }, seed, pubkeyBytes);
+    const transferEvent = await buildSignedTransferEvent({ claimId, from: this.id, to: toDomainId }, seed, pubkeyBytes);
     id = await this.dag.addEvent([id], { type: 'transfer', ...transferEvent });
     this.lastEventId = id;
     return claimId;
@@ -657,7 +657,7 @@ async function runModule(entry) {
     async onTransferClaim(moduleId, claimId, toDomainId) {
       const seed = myDomain.keypair.secretKey.slice(0, 32);
       const pubkeyBytes = myDomain.keypair.publicKey.toBytes();
-      const event = buildSignedTransferEvent({ claimId, from: myDomain.id, to: toDomainId }, seed, pubkeyBytes);
+      const event = await buildSignedTransferEvent({ claimId, from: myDomain.id, to: toDomainId }, seed, pubkeyBytes);
       const id = await myDomain.dag.addEvent([myDomain.lastEventId], { type: 'transfer', ...event });
       myDomain.lastEventId = id;
       log(`[plugin:${moduleId}] transferred claim '${claimId}' to '${toDomainId}'`);
@@ -1273,7 +1273,7 @@ async function submitPluginCode() {
     economicConfig = { alpha, identityCostMechanism, scarcityPolicy: scarcityPolicy || null };
   }
 
-  const event = buildSubmissionEvent(
+  const event = await buildSubmissionEvent(
     { moduleId, codeHash, codeUrl, name: moduleId, icon: '⬡', category: 'Tools', description: '', isIssuing, timeSensitive, economicConfig },
     seed, pubkeyBytes
   );
