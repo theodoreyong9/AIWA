@@ -6,7 +6,7 @@
 // Every other piece of durable state in this project (cadence, accrual,
 // conservation, identity cost) is a materialized view over H_d,
 // propagated for free by EventDag#merge() and folded deterministically
-// by topoOrder() (§9). This file makes the module registry the same
+// by topoOrder(). This file makes the module registry the same
 // kind of thing, instead of the one piece of state that quietly wasn't.
 //
 // Three event payload types, dispatched like every other reducer in
@@ -22,7 +22,7 @@ import { registerModule, updateModuleCode, setAuditStatus, initialModuleRegistry
  * this reducer, like cadence.js and g.js, only reacts to the payload
  * shapes it owns.
  *
- * Determinism note (§9): registerModule() takes a `now` timestamp used
+ * Determinism note: registerModule() takes a `now` timestamp used
  * only for the record's informational `registeredAt` field, never for
  * any decision logic. To keep materialization a pure function of H_d
  * alone, `now` here is taken from the EVENT's own declared `at` field
