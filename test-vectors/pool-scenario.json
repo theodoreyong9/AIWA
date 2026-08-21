@@ -1,0 +1,9 @@
+{
+  "poolId": "parity-pool-1",
+  "cycleIndex": 0,
+  "contributions": [
+    { "contributorDomain": "alice", "claimId": "c1", "amount": 30 },
+    { "contributorDomain": "bob", "claimId": "c2", "amount": 45 },
+    { "contributorDomain": "carol", "claimId": "c3", "amount": 25 }
+  ]
+}
