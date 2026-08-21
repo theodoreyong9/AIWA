@@ -11,6 +11,8 @@ Its purpose is narrower and more useful:
 
 The project separates replicated history, deterministic state materialization, economics, conservation, identity, transport, third-party modules, contracts, presentation, and AI assistance so that each can be analyzed without silently treating one layer as another.
 
+The event DAG and its deterministic materialization (`A = G(H_d, θ)`, §7) answer *how* state is computed from history. They do not, by themselves, answer *why* the resulting coordination can be trusted. That rests on a combination of five real, separately-testable mechanisms — identity (an external, irreversible Genesis Commitment, §15), authenticated per-domain history (signed, causally chained, rate-bounded by real sequential compute cost, §10), cross-referenced observation (a mandatory, signed, per-tick reception commitment, checked entirely by recomputation, §11), causal ordering (free from the DAG's own structure), and the Genesis Commitment itself. No single one of these establishes AIWA's coordination properties alone. Their combination does not prove that two identities belong to two distinct real-world actors — no purely relational or economic mechanism can — but it raises the cost of sustaining a fabricated, mutually-consistent cluster of colluding identities from a one-time expense to a continuous, compounding one. §11 states precisely what this does and does not establish.
+
 ---
 
 ## Table of Contents
@@ -194,6 +196,7 @@ AIWA makes several concrete claims about its **reference implementation**:
 - untrusted module code executes inside a sandboxed iframe boundary;
 - contracts can express declarative causal conditions without executing submitted condition code;
 - transport has a delay-tolerant queueing backend;
+- a mandatory, signed, per-tick reception commitment raises the cost of sustaining a fabricated cluster of colluding identities from a one-time expense to a continuous one, checked entirely by recomputation — it does not, and is not claimed to, prove that two identities belong to two distinct real-world actors;
 - JS and Rust implementations are checked against shared vectors and parity scripts;
 - deliberately broken variants are retained as counterexamples;
 - AI assistance has no authoritative path into consensus or economic validity.
