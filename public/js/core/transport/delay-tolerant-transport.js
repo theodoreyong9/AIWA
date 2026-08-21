@@ -1,4 +1,4 @@
-// delay-tolerant-transport.js — §25's second specified backend: for
+// delay-tolerant-transport.js — a second specified backend: for
 // cross-planet reachability, messages queue locally and flush on the
 // next available contact window, following the general shape of the
 // Bundle Protocol lineage (RFC 9171 and successors) without requiring
@@ -141,7 +141,7 @@ export function createDelayTolerantTransport(sendFn) {
     },
 
     // Extensions beyond the base Transport interface, specific to the
-    // delay-tolerant semantics §25 requires:
+    // delay-tolerant semantics this backend requires:
     flush,
     queueDepth,
     totalQueueDepth,
