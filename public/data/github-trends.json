@@ -1,5 +1,200 @@
 {
-  "fetchedAt": null,
-  "repositories": [],
-  "note": "This file is written by the real, scheduled GitHub bot (.github/workflows/update-github-trends.yml, running scripts/fetch-github-trends.mjs) against GitHub's own real, public search API. It is deliberately committed empty here rather than seeded with fabricated example data — this project's own discipline (never invent trends, never fabricate a network signal) applies to this file exactly as it applies to idea-agent.js's own prompt-building rules. It will be overwritten with real data on the bot's first real scheduled run after this file is merged."
+  "fetchedAt": 1787379384732,
+  "repositories": [
+    {
+      "fullName": "deepseek-ai/deepseek-harness",
+      "description": "DeepSeek Harness: Everything is a Plugin.",
+      "language": "TypeScript",
+      "stars": 182282,
+      "url": "https://github.com/deepseek-ai/deepseek-harness",
+      "topics": [
+        "ai-agents",
+        "cordis",
+        "dsh",
+        "dsh-plugin"
+      ]
+    },
+    {
+      "fullName": "anywhere-labs/deepseek-harness-desktop",
+      "description": "为 DeepSeek Harness (DSH) 插件生态打造的现代化桌面端解决方案。万物皆「插件」，桌面本身也是「插件」。",
+      "language": "TypeScript",
+      "stars": 17778,
+      "url": "https://github.com/anywhere-labs/deepseek-harness-desktop",
+      "topics": [
+        "cordis",
+        "cordis-plugin",
+        "deepseek",
+        "deepseek-harness",
+        "desktop",
+        "dsh",
+        "dsh-plugin",
+        "dsh-plugin-desktop"
+      ]
+    },
+    {
+      "fullName": "guillaumemeyer/watermarks-remover",
+      "description": "Strip multi-vendor AI provenance marks: Unicode text hygiene, statistical rewrite hooks, and C2PA/metadata from PNG/JPEG/SVG/PDF/DOCX/HTML/MD",
+      "language": "Python",
+      "stars": 16711,
+      "url": "https://github.com/guillaumemeyer/watermarks-remover",
+      "topics": [
+        "agent-skill",
+        "ai",
+        "anthropic",
+        "c2pa",
+        "chatgpt",
+        "claude",
+        "gemini",
+        "openai",
+        "provenance",
+        "synthid",
+        "watermark",
+        "watermark-detection",
+        "watermark-tools",
+        "watermarking",
+        "watermarks"
+      ]
+    },
+    {
+      "fullName": "awesome-dsh-plugin/awesome-dsh-plugin",
+      "description": "A curated list of plugins for DeepSeek Harness (dsh) · DeepSeek Harness 插件精选列表",
+      "language": "Python",
+      "stars": 11249,
+      "url": "https://github.com/awesome-dsh-plugin/awesome-dsh-plugin",
+      "topics": [
+        "awesome",
+        "awesome-list",
+        "deepseek-harness",
+        "dsh",
+        "dsh-plugin"
+      ]
+    },
+    {
+      "fullName": "yjh051108/dsh-routing-suite",
+      "description": "dsh-routing-suite — injector + router-standard kit: install the runtime injector first, then the task-aware reasoning-mode router preset (measured P1-P23).",
+      "language": "PowerShell",
+      "stars": 6584,
+      "url": "https://github.com/yjh051108/dsh-routing-suite",
+      "topics": []
+    },
+    {
+      "fullName": "zhu1090093659/dsh-web-ui",
+      "description": "Plugin and skin collection for DeepSeek Harness (DSH) Web UI - task board, git graph, right-side panel, remote mobile UI, pet, live token stats, and skin center.",
+      "language": "TypeScript",
+      "stars": 5467,
+      "url": "https://github.com/zhu1090093659/dsh-web-ui",
+      "topics": [
+        "deepseek-harness",
+        "dsh",
+        "dsh-plugin",
+        "web-ui"
+      ]
+    },
+    {
+      "fullName": "xiaobright/dsh-anchored-standard",
+      "description": "Two-phase DeepSeek Harness preset: Minimal-aligned bootstrap, then full Standard tools (Project2 98/99)",
+      "language": "JavaScript",
+      "stars": 3702,
+      "url": "https://github.com/xiaobright/dsh-anchored-standard",
+      "topics": [
+        "deepseek",
+        "deepseek-harness",
+        "dsh-plugin",
+        "llm-agent"
+      ]
+    },
+    {
+      "fullName": "s1dashu/ip-as-logo-skill",
+      "description": "A compact Agent Skill for highly simplified, rounded, subtly neo-skeuomorphic IP mascot logos.",
+      "language": null,
+      "stars": 3533,
+      "url": "https://github.com/s1dashu/ip-as-logo-skill",
+      "topics": [
+        "codex",
+        "codex-skill",
+        "image-generation",
+        "logo-design",
+        "mascot-design"
+      ]
+    },
+    {
+      "fullName": "dmmulroy/anti-slop",
+      "description": "Opinionated Oxlint rules for rejecting low-evidence TypeScript and JavaScript patterns",
+      "language": "TypeScript",
+      "stars": 3328,
+      "url": "https://github.com/dmmulroy/anti-slop",
+      "topics": [
+        "agent-skills",
+        "linting",
+        "oxlint",
+        "typescript"
+      ]
+    },
+    {
+      "fullName": "yetone/cumora",
+      "description": "Where agent teams gather. Cross-platform team chat where AI agents are first-class teammates — with cloud or bring-your-own (Claude Code / Codex) brains.",
+      "language": "TypeScript",
+      "stars": 2877,
+      "url": "https://github.com/yetone/cumora",
+      "topics": []
+    },
+    {
+      "fullName": "cordiverse/paper",
+      "description": "A Programming Paradigm for Spatiotemporal Composability",
+      "language": null,
+      "stars": 2632,
+      "url": "https://github.com/cordiverse/paper",
+      "topics": []
+    },
+    {
+      "fullName": "antirez/h3.c",
+      "description": "MiniMax H3 inference engine for Mac computers",
+      "language": "C",
+      "stars": 2343,
+      "url": "https://github.com/antirez/h3.c",
+      "topics": []
+    },
+    {
+      "fullName": "ccch1mneyyy/dsh-TUI",
+      "description": "DSH 官方公众号收录的 TUI 补位插件：Claude Code 风，鲸鱼顶栏/实时状态/流式思考/双击 Esc 回滚/上下文进度+TPS。npm 一键装。  DSH official WeChat featured TUI plugin — Claude Code style: whale bar, live status, streaming thoughts, double-Esc rollback, context bar + TPS. npm one-click.",
+      "language": "TypeScript",
+      "stars": 2276,
+      "url": "https://github.com/ccch1mneyyy/dsh-TUI",
+      "topics": [
+        "claude-code",
+        "coding-agent",
+        "deepseek",
+        "deepseek-harness",
+        "dsh-plugin",
+        "ink",
+        "react",
+        "terminal",
+        "tui"
+      ]
+    },
+    {
+      "fullName": "CopilotKit/OpenBot",
+      "description": "Open-source AI coworkers that each get a computer of their own: a browser, files and tools, with every action decided before it happens and recorded after. Bring any AG-UI agent.",
+      "language": "TypeScript",
+      "stars": 2176,
+      "url": "https://github.com/CopilotKit/OpenBot",
+      "topics": [
+        "ag-ui",
+        "agent-governance",
+        "ai-agents",
+        "browser-automation",
+        "copilotkit",
+        "generative-ui",
+        "mcp"
+      ]
+    },
+    {
+      "fullName": "gvzdv/claudish-to-english",
+      "description": "",
+      "language": "Shell",
+      "stars": 2052,
+      "url": "https://github.com/gvzdv/claudish-to-english",
+      "topics": []
+    }
+  ]
 }
